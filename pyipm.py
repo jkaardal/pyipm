@@ -240,7 +240,7 @@ class IPM:
 
     def __init__(self, x0=None, x_dev=None, f=None, df=None, d2f=None, ce=None, dce=None, d2ce=None, ci=None, dci=None, d2ci=None,
             lda0=None, lambda_dev=None, s0=None, mu=0.2, nu=10.0, rho=0.1, tau=0.995, eta=1.0E-4, beta=0.4,
-            miter=20, niter=10, Xtol=None, Ktol=1.0E-4, lbfgs=False, lbfgs_zeta=None, float_dtype=np.float32,
+            miter=20, niter=10, Xtol=None, Ktol=1.0E-4, Ftol=None, lbfgs=False, lbfgs_zeta=None, float_dtype=np.float32,
             verbosity=1):
 
         self.x0 = x0
@@ -274,6 +274,7 @@ class IPM:
         else:
             self.Xtol = self.eps
         self.Ktol = Ktol
+        self.Ftol = Ftol
 
         self.reg_coef = float_dtype(np.sqrt(self.eps))
 
@@ -350,21 +351,41 @@ class IPM:
         self.mu_dev = theano.shared(self.float_dtype(self.mu), name="mu_dev")
         self.nu_dev = theano.shared(self.float_dtype(self.nu), name="nu_dev")
 
-        # construct expression for the constraint Jacobians and primal problem
+        # use automatic differentiation if gradient and/or Hessian (if applicable) expressions of f are not provided
+        if self.df is None:
+            df = T.grad(self.f, self.x_dev)
+        else:
+            df = self.df
+        if not self.lbfgs and self.d2f is None:
+            d2f = theano.gradient.hessian(cost=self.f, wrt=self.x_dev)
+        else:
+            d2f = self.d2f
+
+        # construct expression for the constraint Jacobians and Hessians (if exact Hessian is used)
+        if self.neq:
+            if self.dce is None:
+                dce = theano.gradient.jacobian(self.ce, wrt=self.x_dev).reshape((self.neq, self.nvar)).T
+            else:
+                dce = self.dce
+            if not self.lbfgs: 
+                if self.d2ce is None:
+                    d2ce = theano.gradient.hessian(cost=T.sum(self.ce*self.lambda_dev[:self.neq]), wrt=self.x_dev)
+                else:
+                    d2ce = self.d2ce
+
         if self.nineq:
             Sigma = diag(self.lambda_dev[self.neq:] / (self.s_dev + self.eps))
             if self.dci is None:
                 dci = theano.gradient.jacobian(self.ci, wrt=self.x_dev).reshape((self.nineq, self.nvar)).T
             else:
                 dci = self.dci
+            if not self.lbfgs:
+                if self.d2ci is None:
+                    d2ci = theano.gradient.hessian(cost=T.sum(self.ci*self.lambda_dev[self.neq:]), wrt=self.x_dev)
+                else:
+                    d2ci = self.d2ci
 
-        if self.neq:
-            if self.dce is None:
-                dce = theano.gradient.jacobian(self.ce, wrt=self.x_dev).reshape((self.neq, self.nvar)).T
-            else:
-                dce = self.dce
-
-        # construct expression of all constraints
+        # construct composite expression for the constraints
         if self.neq or self.nineq:
             con = T.zeros((self.neq+self.nineq,))
             if self.neq:
@@ -372,7 +393,7 @@ class IPM:
             if self.nineq:
                 con = T.set_subtensor(con[self.neq:], self.ci-self.s_dev)
 
-        # construct expression for the full constraint Jacobian
+        # construct composite expression for the constraints Jacobian
         if self.neq or self.nineq:
             jaco = T.zeros((self.nvar+self.nineq, self.neq+self.nineq))
             if self.neq:
@@ -381,22 +402,54 @@ class IPM:
                 jaco = T.set_subtensor(jaco[:self.nvar,self.neq:], dci)
                 jaco = T.set_subtensor(jaco[self.nvar:,self.neq:], -T.eye(self.nineq))
 
+        # construct composite expression for the constraints Hessian (if using exact Hessian)
         if not self.lbfgs:
-            # construct expression for the Hessian of the Lagrangian (assumes Lagrange multipliers included in d2ce/d2ci expresssions
-            if self.d2f is None:
-                d2L = theano.gradient.hessian(cost=self.f, wrt=self.x_dev)
-            else:
-                d2L = self.d2f
+            if self.neq or self.nineq:
+                con_hess = T.zeros((self.nvar+self.nineq, self.nvar+self.nineq))
+                if self.neq:
+                    con_hess += d2ce
+                if self.nineq:
+                    con_hess += d2ci
+
+        # construct expression for the gradient, merit function, and merit function gradient
+        grad = T.zeros((self.nvar+2*self.nineq+self.neq,))
+        grad = T.set_subtensor(grad[:self.nvar], df)
+        phi = self.f
+        dphi = T.dot(df, self.dz_dev[:self.nvar])        
+        if self.neq:
+            grad = T.inc_subtensor(grad[:self.nvar], -T.dot(dce, self.lambda_dev[:self.neq]))
+            grad = T.set_subtensor(grad[self.nvar+self.nineq:self.nvar+self.nineq+self.neq], self.ce)
+            phi += self.nu_dev*T.sum(T.abs_(self.ce))
+            dphi -= self.nu_dev*T.sum(T.abs_(self.ce))
+        if self.nineq:
+            grad = T.inc_subtensor(grad[:self.nvar], -T.dot(dci, self.lambda_dev[self.neq:]))
+            grad = T.set_subtensor(grad[self.nvar:self.nvar+self.nineq], self.lambda_dev[self.neq:]-self.mu_dev/(self.s_dev+self.eps))
+            grad = T.set_subtensor(grad[self.nvar+self.nineq+self.neq:], self.ci-self.s_dev)
+            phi += self.nu_dev*T.sum(T.abs_(self.ci-self.s_dev)) - self.mu_dev*T.sum(T.log(self.s_dev))
+            dphi -= self.nu_dev*T.sum(T.abs_(self.ci-self.s_dev)) + T.dot(self.mu_dev/(self.s_dev+self.eps), self.dz_dev[self.nvar:])
+
+        # construct expression for initializing the Lagrange multipliers
+        if self.neq or self.nineq:
+            init_lambda = T.dot(pinv(jaco[:self.nvar,:]), df.reshape((self.nvar,1))).reshape((self.neq+self.nineq,))
+
+        # construct expression for initializing the slack variables
+        if self.nineq:
+            init_slack = T.max(T.concatenate([self.ci.reshape((self.nineq,1)), self.Ktol*T.ones((self.nineq, 1))], axis=1), axis=1)
+
+        # construct expression for gradient of f( + the barrier function)
+        barrier_cost_grad = T.zeros((self.nvar+self.nineq,))
+        barrier_cost_grad = T.set_subtensor(barrier_cost_grad[:self.nvar], df)
+        if self.nineq:
+            barrier_cost_grad = T.set_subtensor(barrier_cost_grad[self.nvar:], -self.mu_dev/(self.s_dev+self.eps))
+
+        # construct expression for the Hessian of the Lagrangian (assumes Lagrange multipliers included in d2ce/d2ci expresssions), if applicable
+        if not self.lbfgs:
+            # construct expression for the Hessian of the Lagrangian
+            d2L = d2f
             if self.neq:
-                if self.d2ce is None:
-                    d2L -= theano.gradient.hessian(cost=T.sum(self.ce*self.lambda_dev[:self.neq]), wrt=self.x_dev)
-                else:
-                    d2L -= self.d2ce
+                d2L -= d2ce
             if self.nineq:
-                if self.d2ci is None:
-                    d2L -= theano.gradient.hessian(cost=T.sum(self.ci*self.lambda_dev[self.neq:]), wrt=self.x_dev)
-                else:
-                    d2L -= self.d2ci
+                d2L -= d2ci
 
             # construct expression for the symmetric Hessian matrix
             hess = T.zeros((self.nvar+2*self.nineq+self.neq, self.nvar+2*self.nineq+self.neq))
@@ -410,68 +463,12 @@ class IPM:
             hess = T.triu(hess) + T.triu(hess).T
             hess = hess - T.diag(T.diagonal(hess)/2.0)
 
-        # construct expression for the gradient, merit function, and merit function gradient
-        grad = T.zeros((self.nvar+2*self.nineq+self.neq,))
-        phi = self.f
-        if self.df is None:
-            dphi = T.dot(T.grad(self.f, self.x_dev), self.dz_dev[:self.nvar])
-        else:
-            dphi = T.dot(self.df, self.dz_dev[:self.nvar])
-        if self.neq and self.nineq:
-            if self.df is None:
-                grad = T.set_subtensor(grad[:self.nvar], T.grad(self.f, self.x_dev) - T.dot(dce, self.lambda_dev[:self.neq]) - T.dot(dci, self.lambda_dev[self.neq:]))
-            else:
-                grad = T.set_subtensor(grad[:self.nvar], self.df - T.dot(dce, self.lambda_dev[:self.neq]) - T.dot(dci, self.lambda_dev[self.neq:]))
-            dphi -= self.nu_dev*T.sum(T.abs_(self.ce)) + self.nu_dev*T.sum(T.abs_(self.ci-self.s_dev))
-            init_lambda = T.dot(pinv(T.concatenate((dce, dci), axis=1)).reshape((self.neq+self.nineq, self.nvar)), T.grad(self.f, self.x_dev).reshape((self.nvar,1))).reshape((self.neq+self.nineq,))
-        elif self.neq:
-            if self.df is None:
-                grad = T.set_subtensor(grad[:self.nvar], T.grad(self.f, self.x_dev) - T.dot(dce, self.lambda_dev))
-            else:
-                grad = T.set_subtensor(grad[:self.nvar], self.df - T.dot(dce, self.lambda_dev))
-            dphi -= self.nu_dev*T.sum(T.abs_(self.ce))
-            init_lambda = T.dot(pinv(dce).reshape((self.neq, self.nvar)), T.grad(self.f, self.x_dev).reshape((self.nvar,1))).reshape((self.neq,))
-        elif self.nineq:
-            if self.df is None:
-                grad = T.set_subtensor(grad[:self.nvar], T.grad(self.f, self.x_dev) - T.dot(dci, self.lambda_dev))
-            else:
-                grad = T.set_subtensor(grad[:self.nvar], self.df - T.dot(dci, self.lambda_dev))
-            dphi -= self.nu_dev*T.sum(T.abs_(self.ci-self.s_dev))
-            init_lambda = T.dot(pinv(dci).reshape((self.nineq, self.nvar)), T.grad(self.f, self.x_dev).reshape((self.nvar,1))).reshape((self.nineq,))
-        else:
-            if self.df is None:
-                grad = T.set_subtensor(grad[:self.nvar], T.grad(self.f, self.x_dev))
-            else:
-                grad = T.set_subtensor(grad[:self.nvar], self.df)
-
-        if self.nineq:
-            phi -= self.mu_dev*T.sum(T.log(self.s_dev))
-            phi += self.nu_dev*T.sum(T.abs_(self.ci - self.s_dev))
-            dphi -= T.dot(self.mu_dev/(self.s_dev+self.eps), self.dz_dev[self.nvar:])
-            grad = T.set_subtensor(grad[self.nvar:(self.nvar+self.nineq)], self.lambda_dev[self.neq:]-self.mu_dev/(self.s_dev+self.eps))
-            grad = T.set_subtensor(grad[(self.nvar+self.nineq+self.neq):], self.ci-self.s_dev)
-            init_slack = T.max(T.concatenate([self.ci.reshape((self.nineq,1)), self.Ktol*T.ones((self.nineq, 1))], axis=1), axis=1)
-        
-        if self.neq:
-            phi += self.nu_dev*T.sum(T.abs_(self.ce))
-            grad = T.set_subtensor(grad[(self.nvar+self.nineq):(self.nvar+self.nineq+self.neq)], self.ce)
-
-        # construct expression for gradient of f( + the barrier function)
-        barrier_cost_grad = T.zeros((self.nvar+self.nineq,))
-        if self.df is None:
-            barrier_cost_grad = T.set_subtensor(barrier_cost_grad[:self.nvar], T.grad(self.f, self.x_dev))
-        else:
-            barrier_cost_grad = T.set_subtensor(barrier_cost_grad[:self.nvar], self.df)
-        if self.nineq:
-            barrier_cost_grad = T.set_subtensor(barrier_cost_grad[self.nvar:], -self.mu_dev/(self.s_dev+self.eps))
-
         # construct expression for general linear system solve
         #gen_solve = T.slinalg.solve(self.M_dev, self.b_dev)
 
         # construct expression for symmetric linear system solve
         sym_solve = T.slinalg.Solve(A_structure='symmetric')
         sym_solve = sym_solve(self.M_dev, self.b_dev)
-
  
         # compile expressions into device functions
         self.cost = theano.function(
@@ -557,6 +554,10 @@ class IPM:
 
         """
 
+        # kkt1 is the gradient of the Lagrangian with respect to x
+        # kkt2 is the gradient of the Lagrangian with respect to s (slack variables)
+        # kkt3 is the gradient of the Lagrangian with respect to lda[:self.neq] (equality constraints Lagrange multipliers)
+        # kkt4 is the gradient of the Lagrangian with respect to lda[self.neq:] (inequality constraints Lagrange multipliers)
         kkts = self.grad(x, s, lda)
 
         if self.neq and self.nineq:
@@ -1078,10 +1079,16 @@ class IPM:
                 print "Searching for a feasible local minimizer using the exact Hessian."
 
         iter_count = 0
+        if self.Ftol is not None:
+            f_past = self.cost(x)
+
+        Ktol_converged = False
+        Ftol_converged = False
 
         for outer in range(self.niter):
 
             if np.linalg.norm(kkt[0]) <= self.Ktol and np.linalg.norm(kkt[1]) <= self.Ktol and np.linalg.norm(kkt[2]) <= self.Ktol and np.linalg.norm(kkt[3]) <= self.Ktol:
+                Ktol_converged = True 
                 break
 
             if self.verbosity > 0 and (self.neq or self.nineq):
@@ -1091,6 +1098,8 @@ class IPM:
 
                 muTol = np.max([self.Ktol, self.mu_host])
                 if np.linalg.norm(kkt[0]) <= muTol and np.linalg.norm(kkt[1]) <= muTol and np.linalg.norm(kkt[2]) <= muTol and np.linalg.norm(kkt[3]) <= muTol:
+                    if not self.neq and not self.nineq:
+                        Ktol_converged = True
                     break
 
                 if self.verbosity > 0:
@@ -1135,19 +1144,38 @@ class IPM:
                 else:
                     x, s, lda = self.search(x, s, lda, dz, self.float_dtype(1.0), self.float_dtype(1.0))
 
+
                 #print self.cost(x)
                 #print x
                 #print s
                 #print lda
                 #print str(np.linalg.norm(kkt[0])) + " " + str(np.linalg.norm(kkt[2]))
 
+                iter_count += 1
+
                 kkt = self.KKT(x, s, lda)
 
-                iter_count += 1
+                if self.Ftol is not None and not self.neq and not self.nineq:
+                    f_new = self.cost(x)               
+                    if np.abs(f_past-f_new) <= np.abs(self.Ftol):
+                        Ftol_converged = True
+                        break
+                    else:
+                        f_past = f_new
 
                 if inner >= self.miter-1:
                     if self.verbosity > 0 and (self.neq or self.nineq):
                         print "MAXIMUM INNER ITERATIONS EXCEEDED"
+
+            if self.Ftol is not None and (self.neq or self.nineq):
+                f_new = self.cost(x)
+                if np.abs(f_past-f_new) <= np.abs(self.Ftol):
+                    Ftol_converged = True
+                else:
+                    f_past = f_new
+
+            if self.Ftol is not None and Ftol_converged:
+                break                
 
             if outer >= self.niter-1:
                 if self.verbosity > 0:
@@ -1171,14 +1199,16 @@ class IPM:
         self.kkt = kkt
         self.fval = self.cost(x)
 
-        if self.verbosity >= 0 and np.linalg.norm(kkt[0]) <= self.Ktol and np.linalg.norm(kkt[1]) <= self.Ktol and np.linalg.norm(kkt[2]) <= self.Ktol and np.linalg.norm(kkt[3]) <= self.Ktol:
-            msg = "Converged "
-        elif self.verbosity >= 0:
-            msg = "Maximum iterations reached "
-            outer = self.niter
-            inner = 0
-
         if self.verbosity >= 0:
+            if np.linalg.norm(kkt[0]) <= self.Ktol and np.linalg.norm(kkt[1]) <= self.Ktol and np.linalg.norm(kkt[2]) <= self.Ktol and np.linalg.norm(kkt[3]) <= self.Ktol:
+                msg = "Converged to Ktol tolerance "
+            elif self.Ftol is not None and Ftol_converged:
+                msg = "Converged to Ftol tolerance "
+            else:
+                msg = "Maximum iterations reached "
+                outer = self.niter
+                inner = 0
+
             if self.neq or self.nineq:
                 if outer > 1:
                     msg += "after " + str(outer-1) + " outer "
@@ -1217,7 +1247,27 @@ def main():
     import sys
     import os
 
+    # To use L-BFGS to approximate the Hessian, set lbfgs to a positive integer to define the
+    # number of iterations to store to make the Hessian approximation. Otherwise, set lbfgs to
+    # False or 0.
+    lbfgs = 4
+
+    # The verbosity level between from -1 up to 3 determines the amount of feedback the algorithm
+    # gives to the user during the optimization.
+    verbosity = 1
+
+    # Setting Ftol (the function tolerance) can be a helpful secondary criteria for convergence;
+    # by default, Ftol is unset and only Ktol is used (the KKT conditions tolerance).
+    Ftol = 1.0E-8
+
+    # x_dev is a device vector that must be predefined by the user and is used to build theano
+    # expressions.
+    x_dev = T.vector('x_dev')
+
+    # get the problem number from the command line argument list.
     prob = int(sys.argv[1])
+
+    # determine the floating-point type from the 'THEANO_FLAGS' environment variable.
     float_dtype = os.environ.get('THEANO_FLAGS')
     if float_dtype is not None:
         try:
@@ -1228,16 +1278,12 @@ def main():
     else:
         raise Exception("Error: 'THEANO_FLAGS' environment variable is unset.")
         exit()
-
     if float_dtype.strip() == "float32":
         float_dtype = np.float32
     else:
         float_dtype = np.float64
 
-    lbfgs = 4
-    x_dev = T.vector('x_dev')
-    verbosity = 1
-
+    # example problem definitions
     if prob == 1:
         print "minimize f(x,y) = x**2 - 4*x + y^2 - y - x*y"
         print ""
@@ -1245,7 +1291,7 @@ def main():
 
         f = x_dev[0]**2 - 4*x_dev[0] + x_dev[1]**2 - x_dev[1] - x_dev[0]*x_dev[1]
 
-        p = IPM(x0=x0, x_dev=x_dev, f=f, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
+        p = IPM(x0=x0, x_dev=x_dev, f=f, Ftol=Ftol, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
         x, s, lda, fval, kkt = p.solve()
 
         print ""
@@ -1260,7 +1306,7 @@ def main():
         
         f = 100*(x_dev[1]-x_dev[0]**2)**2 + (1-x_dev[0])**2
 
-        p = IPM(x0=x0, x_dev=x_dev, f=f, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
+        p = IPM(x0=x0, x_dev=x_dev, f=f, Ftol=Ftol, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
         x, s, lda, fval, kkt = p.solve()
 
         print ""
@@ -1275,7 +1321,7 @@ def main():
         f = -T.sum(x_dev)
         ce = T.sum(x_dev ** 2)-1.0
 
-        p = IPM(x0=x0, x_dev=x_dev, f=f, ce=ce, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
+        p = IPM(x0=x0, x_dev=x_dev, f=f, ce=ce, Ftol=Ftol, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
         x, s, lda, fval, kkt = p.solve()
 
         print ""
@@ -1291,7 +1337,7 @@ def main():
         f = -(x_dev[0]**2)*x_dev[1]
         ce = T.sum(x_dev ** 2) - 3.0
 
-        p = IPM(x0=x0, x_dev=x_dev, f=f, ce=ce, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
+        p = IPM(x0=x0, x_dev=x_dev, f=f, ce=ce, Ftol=Ftol, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
         x, s, lda, fval, kkt = p.solve()
 
         print ""
@@ -1310,7 +1356,7 @@ def main():
         ci = T.set_subtensor(ci[1], x_dev[0])
         ci = T.set_subtensor(ci[2], x_dev[1])
 
-        p = IPM(x0=x0, x_dev=x_dev, f=f, ci=ci, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
+        p = IPM(x0=x0, x_dev=x_dev, f=f, ci=ci, Ftol=Ftol, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
         x, s, lda, fval, kkt = p.solve()
 
         print ""
@@ -1330,7 +1376,7 @@ def main():
         ce = T.sum(x_dev) - 1.0
         ci = 1.0*x_dev
 
-        p = IPM(x0=x0, x_dev=x_dev, f=f, ce=ce, ci=ci, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
+        p = IPM(x0=x0, x_dev=x_dev, f=f, ce=ce, ci=ci, Ftol=Ftol, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
         x, s, lda, fval, kkt = p.solve()
 
         gt = str(float_dtype(1.0/6.0))
@@ -1349,7 +1395,7 @@ def main():
         ce = T.sum(x_dev) - 1.0
         ci = 1.0*x_dev
 
-        p = IPM(x0=x0, x_dev=x_dev, f=f, ce=ce, ci=ci, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
+        p = IPM(x0=x0, x_dev=x_dev, f=f, ce=ce, ci=ci, Ftol=Ftol, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
         x, s, lda, fval, kkt = p.solve()
 
         print ""
@@ -1368,7 +1414,7 @@ def main():
         ce = T.set_subtensor(ce[0], 2.0*x_dev[0]-x_dev[1]-x_dev[2]-2.0)
         ce = T.set_subtensor(ce[1], x_dev[0]**2+x_dev[1]**2-1.0)
 
-        p = IPM(x0=x0, x_dev=x_dev, f=f, ce=ce, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
+        p = IPM(x0=x0, x_dev=x_dev, f=f, ce=ce, Ftol=Ftol, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
         x, s, lda, fval, kkt = p.solve()
 
         print ""
@@ -1386,7 +1432,7 @@ def main():
         ci = T.set_subtensor(ci[0], -x_dev[0]-4.0*x_dev[1]+3.0)
         ci = T.set_subtensor(ci[1], x_dev[0]-x_dev[1])
 
-        p = IPM(x0=x0, x_dev=x_dev, f=f, ci=ci, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
+        p = IPM(x0=x0, x_dev=x_dev, f=f, ci=ci, Ftol=Ftol, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
         x, s, lda, fval, kkt = p.solve()
 
         print ""
@@ -1404,7 +1450,7 @@ def main():
         ce = x_dev[2] - x_dev[1] - x_dev[0] - 1.0
         ci = x_dev[2] - x_dev[0]**2
 
-        p = IPM(x0=x0, x_dev=x_dev, f=f, ce=ce, ci=ci, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
+        p = IPM(x0=x0, x_dev=x_dev, f=f, ce=ce, ci=ci, Ftol=Ftol, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
         x, s, lda, fval, kkt = p.solve()
 
         print ""

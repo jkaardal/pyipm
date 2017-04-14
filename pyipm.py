@@ -5,6 +5,7 @@ from theano.tensor.nlinalg import pinv
 from theano.tensor.nlinalg import diag
 from theano.tensor.nlinalg import eigh
 from theano.tensor.slinalg import eigvalsh
+from theano.ifelse import ifelse
 
 class IPM:
     """Solve nonlinear, nonconvex minimization problems using an interior-point method.
@@ -260,7 +261,7 @@ class IPM:
            [2] Byrd RH, Nocedal J, & Schnabel RB, 'Representations of quasi-Newton
                  matrices and their use in limited memory methods', Mathematical
                  programming, 63(1), 129-156 (1994).
-           [3] Wächter A & Biegler LT, 'On the implementation of an interior-point
+           [3] Wachter A & Biegler LT, 'On the implementation of an interior-point
                  filter line-search algorithm for large-scale nonlinear programming',
                  Mathematical programming, 106(1), 25-57 (2006).
         
@@ -610,23 +611,6 @@ class IPM:
             if self.nineq:
                 dphi -= self.nu_dev*T.sum(T.abs_(self.ci-self.s_dev)) + T.dot(self.mu_dev/(self.s_dev+self.eps), self.dz_dev[self.nvar:])
 
-        # construct expression for the gradient, merit function, and merit function gradient
-        #grad = T.zeros((self.nvar+2*self.nineq+self.neq,))
-        #grad = T.set_subtensor(grad[:self.nvar], df)
-        #phi = self.f
-        #dphi = T.dot(df, self.dz_dev[:self.nvar])        
-        #if self.neq:
-            #grad = T.inc_subtensor(grad[:self.nvar], -T.dot(dce, self.lambda_dev[:self.neq]))
-            #grad = T.set_subtensor(grad[self.nvar+self.nineq:self.nvar+self.nineq+self.neq], self.ce)
-            #phi += self.nu_dev*T.sum(T.abs_(self.ce))
-            #dphi -= self.nu_dev*T.sum(T.abs_(self.ce))
-        #if self.nineq:
-            #grad = T.inc_subtensor(grad[:self.nvar], -T.dot(dci, self.lambda_dev[self.neq:]))
-            #grad = T.set_subtensor(grad[self.nvar:self.nvar+self.nineq], self.lambda_dev[self.neq:]-self.mu_dev/(self.s_dev+self.eps))
-            #grad = T.set_subtensor(grad[self.nvar+self.nineq+self.neq:], self.ci-self.s_dev)
-            #phi += self.nu_dev*T.sum(T.abs_(self.ci-self.s_dev)) - self.mu_dev*T.sum(T.log(self.s_dev))
-            #dphi -= self.nu_dev*T.sum(T.abs_(self.ci-self.s_dev)) + T.dot(self.mu_dev/(self.s_dev+self.eps), self.dz_dev[self.nvar:])
-
         # construct expression for initializing the Lagrange multipliers
         if self.neq or self.nineq:
             if precompile:
@@ -707,7 +691,11 @@ class IPM:
         # construct expression for symmetric linear system solve
         sym_solve = T.slinalg.Solve(A_structure='symmetric')
         sym_solve = sym_solve(self.M_dev, self.b_dev)
- 
+
+        # if using L-BFGS, get the expression for the descent direction
+        if self.lbfgs:
+            dz, dz_sqr = self.lbfgs_builder()
+
         # compile expressions into device functions
         if precompile:
             self.cost = f_func
@@ -726,7 +714,11 @@ class IPM:
             self.grad = theano.function(inputs=[self.x_dev, self.s_dev, self.lambda_dev],
                     outputs=grad, on_unused_input='ignore')
 
-        if not self.lbfgs:
+        if self.lbfgs:
+            self.lbfgs_dir_func = theano.function(inputs=[self.x_dev, self.s_dev, self.lambda_dev, self.g_dev, self.zeta_dev, self.S_dev, self.Y_dev, self.SS_dev, self.L_dev, self.D_dev, self.B_dev], outputs=dz, on_unused_input='ignore')
+            if dz_sqr is not None:
+                self.lbfgs_dir_func_sqr = theano.function(inputs=[self.x_dev, self.s_dev, self.lambda_dev, self.g_dev, self.zeta_dev, self.s_dev, self.Y_dev, self.SS_dev, self.L_dev, self.D_dev, self.B_dev], outputs=dz_sqr, on_unused_input='ignore')
+        else:
             if precompile:
                 self.hess = hess
             else:
@@ -850,6 +842,121 @@ class IPM:
 
         return (zeta, S, Y, SS, L, D, lbfgs_fail)
 
+    def lbfgs_builder(self):
+        """Build the descent direction calculation in theano.
+
+        """
+
+        # gradient vector
+        self.g_dev = T.vector('self.g_dev')
+
+        # initial guess of Hessian
+        self.zeta_dev = T.scalar('self.zeta_dev')
+
+        # storage arrays
+        self.S_dev = T.matrix('S_dev')
+        self.Y_dev = T.matrix('Y_dev')
+        self.SS_dev = T.matrix('SS_dev')
+        self.L_dev = T.matrix('L_dev')
+        self.D_dev = T.matrix('D_dev')
+
+        # Jacobian transposed
+        if self.neq or self.nineq:
+            self.B_dev = T.matrix('B_dev')
+        else:
+            self.B_dev = T.scalar('B_dev')
+            
+        # get the current number of L-BFGS updates
+        m_lbfgs = self.S_dev.shape[1]
+
+        sym_solve = T.slinalg.Solve(A_structure='symmetric')
+        
+        if self.neq or self.nineq:
+
+            Adiag = self.zeta_dev*T.ones((self.nvar,1))
+            if self.nineq:
+                # append Sigma
+                Sigma = (self.lambda_dev[self.neq:]/(self.s_dev + self.eps)).reshape((self.nineq,1))
+                Adiag = T.concatenate([Adiag, Sigma], axis=0)
+
+            if self.nvar+self.nineq == self.neq+self.nineq:
+                # Jacobian is square, include possibility to use reduced update
+                v01 = sym_solve(self.B_dev, self.g_dev[:self.nvar+self.nineq].reshape((self.neq+self.nineq,1)))
+                v02 = sym_solve(self.B_dev.T, self.g_dev[self.nvar+self.nineq:].reshape((self.neq+self.nineq,1)))
+                v03 = -Adiag*sym_solve(self.B_dev, v02)
+                Zg = T.concatenate([v02, v01 + v03], axis=0)
+
+                W = T.concatenate([self.zeta_dev*self.S_dev, self.Y_dev], axis=1)
+                if self.nineq:
+                    W = T.concatenate([W, T.zeros((self.nineq, 2*m_lbfgs))], axis=0)
+                    
+                invB_W = sym_xolve(B, W)
+
+                M0 = T.concatenate([self.zeta_dev*self.SS_dev, self.L_dev], axis=1)
+                M1 = T.concatenate([self.L_dev.T, -self.D_dev], axis=1)
+                Minv = T.concatenate([M0, M1], axis=0)
+
+                v10 = T.dot(W.T, Zg[:self.nvar+self.nineq])
+                v11 = -sym_solve(Minv, v10)
+
+                X10 = T.concatenate([T.zeros((self.nvar+self.nineq, 2*m_lbfgs)), invB_W], axis=0)
+                XZg = T.dot(X10, v11)
+
+                dz_sqr = ifelse(T.gt(m_lbfgs,0), Zg-XZg, Zg)
+            
+            # set-up quantities for multiplication of the initial inverse Hessian by the negative gradient
+            BT_invA = self.B_dev.T
+            BT_invA = T.dot(BT_invA, diag(1.0/Adiag.reshape((Adiag.size,))))
+            BT_invA_B = T.dot(BT_invA, self.B_dev)
+
+            if self.neq:
+                # regularize if the equality constraints Jacobian causes ill-conditioning
+                w = eigh(BT_invA_B[:self.neq,:self.neq])[0]
+                rcond = T.min(T.abs_(w))/T.max(T.abs_(w))
+                BT_invA_B = ifelse(T.le(rcond, self.eps), T.inc_subtensor(BT_invA_B[:self.neq,:self.neq], self.reg_coef*self.eta*(self.mu_dev ** self.beta)*T.eye(self.neq)), BT_invA_B)
+
+            v00 = T.dot(BT_invA, self.g_dev[:self.nvar+self.nineq].reshape((self.nvar+self.nineq,1)))
+            v01 = sym_solve(BT_invA_B, v00)
+            v02 = self.g_dev[:self.nvar+self.nineq].reshape((self.nvar+self.nineq,1))/Adiag - T.dot(BT_invA.T, v01)
+            v03 = -sym_solve(BT_invA_B, self.g_dev[self.nvar+self.nineq:].reshape((self.neq+self.nineq,1)))
+            v04 = -T.dot(BT_invA.T, v03)
+            Zg = T.concatenate([v02 + v04, v01 + v03], axis=0)
+
+            W = T.concatenate([self.zeta_dev*self.S_dev, self.Y_dev], axis=1)
+            if self.nineq:
+                W = T.concatenate([W, T.zeros((self.nineq, 2*m_lbfgs))], axis=0)
+            BT_gmaW = T.dot(self.B_dev.T, W)/self.zeta_dev
+            X00 = -sym_solve(BT_invA_B, BT_gmaW)
+            X01 = W/self.zeta_dev + T.dot(BT_invA.T, X00)
+            X02 = T.dot(W.T, X01)
+
+            M0 = T.concatenate([self.zeta_dev*self.SS_dev, self.L_dev], axis=1)
+            M1 = T.concatenate([self.L_dev.T, -self.D_dev], axis=1)
+            Minv = T.concatenate([M0, M1], axis=0)
+
+            v10 = T.dot(W.T, Zg[:self.nvar+self.nineq])
+            v11 = sym_solve(X02 - Minv, v10)
+
+            X10 = T.concatenate([X01, -X00], axis=0)
+            XZg = T.dot(X10, v11)
+
+            dz = ifelse(T.gt(m_lbfgs, 0), Zg-XZg, Zg)
+        else:
+            Hg = self.zeta_dev*self.g_dev.reshape((self.nvar,1))
+
+            W = T.concatenate([self.S_dev, self.zeta_dev*self.Y_dev], axis=1)
+            WT_g = T.dot(W.T, self.g_dev)
+            B = -sym_solve(self.L_dev, WT_g[:m_lbfgs].reshape((m_lbfgs,1)))
+            A = -sym_solve(self.L_dev.T, T.dot(self.D_dev + self.zeta_dev*self.SS_dev, B)) - sym_solve(self.L_dev.T, WT_g[m_lbfgs:].reshape((m_lbfgs,1)))
+            Hg_update = T.dot(W, T.concatenate([A, B], axis=0))
+
+            dz = ifelse(T.gt(m_lbfgs, 0), Hg + Hg_update, Hg)
+
+        if self.nvar+self.nineq == self.neq+self.nineq:
+            return (dz, dz_sqr)
+        else:
+            return (dz, None)
+
     def lbfgs_dir(self, x, s, lda, g, zeta, S, Y, SS, L, D):
         """Calculate the descent direction for the L-BFGS algorithm.
 
@@ -863,100 +970,13 @@ class IPM:
             reduce = False
             B = self.jaco(x)
             if B.shape[0] == B.shape[1]:
-                # B is a square matrix
-                w = self.eigh(B)
-                rcond = np.min(np.abs(w))/np.max(np.abs(w))
-                if rcond > self.eps:
+                if np.linalg.cond(B) < 1.0/self.eps:
                     # B is invertible, reduce problem
                     reduce = True
-
-            # set-up approximate second-derivative to the Lagrangian (diagonal matrix)
-            Adiag = zeta*np.ones((self.nvar,1), dtype=self.float_dtype)
-            if self.nineq:
-                # append Sigma
-                Sigma = (lda[self.neq:]/(s + self.eps)).reshape((self.nineq,1))
-                Adiag = np.concatenate([Adiag, Sigma], axis=0)
-
             if reduce:
-                # calculate initial inverse Hessian multiplied by the negative gradient
-                v01 = self.sym_solve(B, g[:self.nvar+self.nineq].reshape((self.neq+self.nineq,1)))
-                v02 = self.sym_solve(B.T, g[self.nvar+self.nineq:].reshape((self.neq+self.nineq,1)))
-                v03 = -Adiag*self.sym_solve(B, v02)
-                Zg = np.concatenate([v02, v01 + v03], axis=0)
-
-                if m_lbfgs > 0:
-                    # set-up quantities to calculate the direction caused by updates to the approximate Hessian
-                    W = np.concatenate([zeta*S, Y], axis=1)
-                    if self.nineq:
-                        W = np.concatenate([W, np.zeros((self.nineq, 2*m_lbfgs), dtype=self.float_dtype)], axis=0)                    
-                    invB_W = self.sym_solve(B, W)
-
-                    M0 = np.concatenate([zeta*SS, L], axis=1)
-                    M1 = np.concatenate([L.T, -D], axis=1)
-                    Minv = np.concatenate([M0, M1], axis=0)
-
-                    # calculate intermediate
-                    v10 = np.dot(W.T, Zg[:self.nvar+self.nineq])
-                    v11 = -self.sym_solve(Minv, v10)
-
-                    X10 = np.concatenate([np.zeros((self.nvar+self.nineq, 2*m_lbfgs), dtype=self.float_dtype), invB_W], axis=0)
-                    XZg = np.dot(X10, v11)
-
-                    # combine two terms to get direction
-                    dz = Zg-XZg
-                else:
-                    # storage arrays empty, set direction to "guess"
-                    dz = Zg
-
+                dz = self.lbfgs_dir_func_sqr(x, s, lda, g, zeta, S, Y, SS, L, D, B)
             else:
-                # set-up quantities for multiplication of the initial inverse Hessian by the negative gradient
-                BT_invA = np.copy(B.T)
-                BT_invA[:,:self.nvar] /= zeta
-                if self.nineq:
-                    # multiply by Sigma inverse
-                    BT_invA[self.neq:,self.nvar:] = -np.diag(s/(lda[self.neq:] + self.eps))
-                BT_invA_B = np.dot(BT_invA, B)
-                if self.neq:
-                    # check if equality constraints Jacobian product is ill-conditioned
-                    w = self.eigh(BT_invA_B[:self.neq,:self.neq])
-                    rcond = np.min(np.abs(w))/np.max(np.abs(w))
-                    if rcond <= self.eps:
-                        # equality constraints Jacobian product is ill-conditioned; adding small diagonal offset
-                        BT_invA_B[:self.neq,:self.neq] += self.reg_coef*self.eta*(self.mu_host ** beta)*np.eye(self.neq, dtype=self.float_dtype)
-                # calculate initial inverse Hessian multiplied by the negative gradient
-                v00 = np.dot(BT_invA, g[:self.nvar+self.nineq].reshape((self.nvar+self.nineq,1)))
-                v01 = self.sym_solve(BT_invA_B, v00)
-                v02 = g[:self.nvar+self.nineq].reshape((self.nvar+self.nineq,1))/Adiag - np.dot(BT_invA.T, v01)
-                v03 = -self.sym_solve(BT_invA_B, g[self.nvar+self.nineq:].reshape((self.neq+self.nineq,1)))
-                v04 = -np.dot(BT_invA.T, v03)
-                Zg = np.concatenate([v02 + v04, v01 + v03], axis=0)
-
-                if m_lbfgs > 0:
-                    # set-up quantities to calculate the direction caused by updates to the approximate Hessian
-                    W = np.concatenate([zeta*S, Y], axis=1)
-                    if self.nineq:
-                        W = np.concatenate([W, np.zeros((self.nineq, 2*m_lbfgs), dtype=self.float_dtype)], axis=0)
-                    BT_gmaW = np.dot(B.T, W)/zeta
-                    X00 = -self.sym_solve(BT_invA_B, BT_gmaW)
-                    X01 = W/zeta + np.dot(BT_invA.T, X00)
-                    X02 = np.dot(W.T, X01)
-                
-                    M0 = np.concatenate([zeta*SS, L], axis=1)
-                    M1 = np.concatenate([L.T, -D], axis=1)
-                    Minv = np.concatenate([M0, M1], axis=0)
-
-                    # calculate intermediate
-                    v10 = np.dot(W.T, Zg[:self.nvar+self.nineq])
-                    v11 = self.sym_solve(X02 - Minv, v10)
-
-                    X10 = np.concatenate([X01, -X00], axis=0)
-                    XZg = np.dot(X10, v11)
-
-                    # combine two terms to get direction
-                    dz = Zg-XZg
-                else:
-                    # storage arrays empty, set direction to "guess"
-                    dz = Zg
+                dz = self.lbfgs_dir_func(x, s, lda, g, zeta, S, Y, SS, L, D, B)                
 
                 # inefficient prototype for testing
                 #H = np.zeros((self.nvar+2*self.nineq+self.neq, self.nvar+2*self.nineq+self.neq))
@@ -979,17 +999,7 @@ class IPM:
                 #dz = self.sym_solve(H, g.reshape((g.size,1)))
         else:
             # SS and L translate to YY and R
-            Hg = zeta*g.reshape((self.nvar,1))
-
-            if m_lbfgs:
-                W = np.concatenate([S, zeta*Y], axis=1)
-                WT_g = np.dot(W.T, g)
-                B = -self.sym_solve(L, WT_g[:m_lbfgs].reshape((m_lbfgs,1)))
-                A = -self.sym_solve(L.T, np.dot(D + zeta*SS, B)) - self.sym_solve(L.T, WT_g[m_lbfgs:].reshape((m_lbfgs,1)))
-                Hg_update = np.dot(W, np.concatenate([A, B], axis=0))
-                dz = Hg + Hg_update
-            else:
-                dz = Hg
+            dz = self.lbfgs_dir_func(x, s, lda, g, zeta, S, Y, SS, L, D, None)
 
             # inefficient prototype for testing
             #H = 1.0/zeta*np.eye(self.nvar)
@@ -1005,7 +1015,7 @@ class IPM:
             #    H -= np.dot(W, self.sym_solve(Minv, W.T.reshape((W.size/self.nvar, self.nvar))))
             #
             #dz = self.sym_solve(H, g.reshape((g.size,1)))
-
+            
         return dz.reshape((dz.size,))
 
     def lbfgs_curv_perturb(self, dx, dg):
@@ -1294,7 +1304,7 @@ class IPM:
                 s = self.s0.astype(self.float_dtype)
             self.mu_host = self.mu
         else:
-            s = np.array([], dtype=float_dtype)
+            s = np.array([], dtype=self.float_dtype)
             self.mu_host = self.Ktol
             self.mu_dev.set_value(self.float_dtype(self.mu_host))
 
@@ -1500,7 +1510,7 @@ def main():
     # To use L-BFGS to approximate the Hessian, set lbfgs to a positive integer to define the
     # number of iterations to store to make the Hessian approximation. Otherwise, set lbfgs to
     # False or 0.
-    lbfgs = False
+    lbfgs = 4
 
     # The verbosity level between from -1 up to 3 determines the amount of feedback the algorithm
     # gives to the user during the optimization.
@@ -1702,26 +1712,7 @@ def main():
         ce = x_dev[2] - x_dev[1] - x_dev[0] - 1.0
         ci = x_dev[2] - x_dev[0]**2
 
-        lambda_dev = T.vector('lambda_dev')
-
-        df = T.grad(f, x_dev)
-        d2f = theano.gradient.hessian(cost=f, wrt=x_dev)
-        dce = theano.gradient.jacobian(ce, wrt=x_dev).reshape((3, 1)).T
-        d2ce = theano.gradient.hessian(cost=T.sum(ce*lambda_dev[:1]), wrt=x_dev)
-        dci = theano.gradient.jacobian(ci, wrt=x_dev).reshape((3, 1)).T
-        d2ci = theano.gradient.hessian(cost=T.sum(ci*lambda_dev[1:]), wrt=x_dev)
-
-        f = theano.function(inputs=[x_dev], outputs=f)
-        df = theano.function(inputs=[x_dev], outputs=df)
-        d2f = theano.function(inputs=[x_dev], outputs=d2f)
-        ce = theano.function(inputs=[x_dev], outputs=ce)
-        dce = theano.function(inputs=[x_dev], outputs=dce)
-        d2ce = theano.function(inputs=[x_dev, lambda_dev], outputs=d2ce)
-        ci = theano.function(inputs=[x_dev], outputs=ci)
-        dci = theano.function(inputs=[x_dev], outputs=dci)
-        d2ci = theano.function(inputs=[x_dev, lambda_dev], outputs=d2ci)
-
-        p = IPM(x0=x0, x_dev=x_dev, f=f, df=df, d2f=d2f, ce=ce, dce=dce, d2ce=d2ce, ci=ci, dci=dci, d2ci=d2ci, lambda_dev=lambda_dev, Ftol=Ftol, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
+        p = IPM(x0=x0, x_dev=x_dev, f=f, ce=ce, ci=ci, Ftol=Ftol, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
         x, s, lda, fval, kkt = p.solve()
 
         print ""
@@ -1736,4 +1727,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 

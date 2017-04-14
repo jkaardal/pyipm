@@ -35,38 +35,38 @@ def make_text_state(state, m):
     return "|".join(string) 
 
 state_blacklist = []
-state_blacklist.append(["NULL", None, None, None, None, None, None, None, None])
-state_blacklist.append(["auto-diff", None, None, None, None, None, None, None, None])
-state_blacklist.append(["precompiled", "auto-diff", None, None, None, None, None, None, None])
-state_blacklist.append(["precompiled", None, "auto-diff", None, None, None, None, None, None])
-state_blacklist.append(["precompiled", "NULL", None, None, None, None, None, None, None])
-state_blacklist.append(["expression", "NULL", None, None, None, None, None, None, None])
-state_blacklist.append([None, None, None, "auto-diff", None, None, None, None, None])
-state_blacklist.append([None, None, None, "precompiled", "auto-diff", None, None, None, None])
-state_blacklist.append([None, None, None, "precompiled", None, "auto-diff", None, None, None])
-state_blacklist.append([None, None, None, None, None, None, "precompiled", "auto-diff", None])
-state_blacklist.append([None, None, None, None, None, None, "precompiled", None, "auto-diff"])
-state_blacklist.append([None, None, None, None, None, None, "auto-diff", None, None])
-state_blacklist.append([None, None, None, "NULL", "precompiled", None, None, None, None])
-state_blacklist.append([None, None, None, "NULL", "expression", None, None, None, None])
-state_blacklist.append([None, None, None, "NULL", "auto-diff", None, None, None, None])
-state_blacklist.append([None, None, None, "NULL", None, "precompiled", None, None, None])
-state_blacklist.append([None, None, None, "NULL", None, "expression", None, None, None])
-state_blacklist.append([None, None, None, "NULL", None, "auto-diff", None, None, None])
-state_blacklist.append([None, None, None, None, None, None, "NULL", "precompiled", None])
-state_blacklist.append([None, None, None, None, None, None, "NULL", "expression", None])
-state_blacklist.append([None, None, None, None, None, None, "NULL", "auto-diff", None])
-state_blacklist.append([None, None, None, None, None, None, "NULL", None, "precompiled"])
-state_blacklist.append([None, None, None, None, None, None, "NULL", None, "expression"])
-state_blacklist.append([None, None, None, None, None, None, "NULL", None, "auto-diff"])
-state_blacklist.append([None, None, None, "precompiled", "NULL", None, None, None, None])
-state_blacklist.append([None, None, None, "precompiled", None, "NULL", None, None, None])
-state_blacklist.append([None, None, None, "expression", "NULL", None, None, None, None])
-state_blacklist.append([None, None, None, "expression", None, "NULL", None, None, None])
-state_blacklist.append([None, None, None, None, None, None, "precompiled", "NULL", None])
-state_blacklist.append([None, None, None, None, None, None, "precompiled", None, "NULL"])
-state_blacklist.append([None, None, None, None, None, None, "expression", "NULL", None])
-state_blacklist.append([None, None, None, None, None, None, "expression", None, "NULL"])
+state_blacklist.append(["BOTH", "NULL", None, None, None, None, None, None, None, None])
+state_blacklist.append(["BOTH", "auto-diff", None, None, None, None, None, None, None, None])
+state_blacklist.append(["BOTH", "precompiled", "auto-diff", None, None, None, None, None, None, None])
+state_blacklist.append(["BOTH", "precompiled", None, "auto-diff", None, None, None, None, None, None])
+state_blacklist.append(["BOTH", "precompiled", "NULL", None, None, None, None, None, None, None])
+state_blacklist.append(["BOTH", "expression", "NULL", None, None, None, None, None, None, None])
+state_blacklist.append(["BOTH", None, None, None, "auto-diff", None, None, None, None, None])
+state_blacklist.append(["BOTH", None, None, None, "precompiled", "auto-diff", None, None, None, None])
+state_blacklist.append(["BOTH", None, None, None, "precompiled", None, "auto-diff", None, None, None])
+state_blacklist.append(["BOTH", None, None, None, None, None, None, "precompiled", "auto-diff", None])
+state_blacklist.append(["BOTH", None, None, None, None, None, None, "precompiled", None, "auto-diff"])
+state_blacklist.append(["BOTH", None, None, None, None, None, None, "auto-diff", None, None])
+state_blacklist.append(["BOTH", None, None, None, "NULL", "precompiled", None, None, None, None])
+state_blacklist.append(["BOTH", None, None, None, "NULL", "expression", None, None, None, None])
+state_blacklist.append(["BOTH", None, None, None, "NULL", "auto-diff", None, None, None, None])
+state_blacklist.append(["BOTH", None, None, None, "NULL", None, "precompiled", None, None, None])
+state_blacklist.append(["BOTH", None, None, None, "NULL", None, "expression", None, None, None])
+state_blacklist.append(["BOTH", None, None, None, "NULL", None, "auto-diff", None, None, None])
+state_blacklist.append(["BOTH", None, None, None, None, None, None, "NULL", "precompiled", None])
+state_blacklist.append(["BOTH", None, None, None, None, None, None, "NULL", "expression", None])
+state_blacklist.append(["BOTH", None, None, None, None, None, None, "NULL", "auto-diff", None])
+state_blacklist.append(["BOTH", None, None, None, None, None, None, "NULL", None, "precompiled"])
+state_blacklist.append(["BOTH", None, None, None, None, None, None, "NULL", None, "expression"])
+state_blacklist.append(["BOTH", None, None, None, None, None, None, "NULL", None, "auto-diff"])
+state_blacklist.append(["BOTH", None, None, None, "precompiled", "NULL", None, None, None, None])
+state_blacklist.append(["EXACT", None, None, None, "precompiled", None, "NULL", None, None, None])
+state_blacklist.append(["BOTH", None, None, None, "expression", "NULL", None, None, None, None])
+state_blacklist.append(["EXACT", None, None, None, "expression", None, "NULL", None, None, None])
+state_blacklist.append(["BOTH", None, None, None, None, None, None, "precompiled", "NULL", None])
+state_blacklist.append(["EXACT", None, None, None, None, None, None, "precompiled", None, "NULL"])
+state_blacklist.append(["BOTH", None, None, None, None, None, None, "expression", "NULL", None])
+state_blacklist.append(["EXACT", None, None, None, None, None, None, "expression", None, "NULL"])
 
 test_problems = []
 
@@ -92,7 +92,7 @@ p2["nineq"] = 0
 p2["init"] = np.random.randn(2).astype(float_dtype)
 p2["ground_truth"] = [np.array([1.0, 1.0], dtype=float_dtype)]
 
-test_problems.append(p2)
+#test_problems.append(p2)
 
 p3 = dict()
 p3["text_statements"] = ["maximize f(x,y) = x+y subject to x**2 + y**2 = 1"]
@@ -104,7 +104,7 @@ p3["nineq"] = 0
 p3["init"] = np.random.randn(2).astype(float_dtype)
 p3["ground_truth"] = [np.array([np.sqrt(2.0)/2.0, np.sqrt(2.0)/2.0], dtype=float_dtype)]
 
-test_problems.append(p3)
+#test_problems.append(p3)
 
 p4 = dict()
 p4["text_statements"] = ["maximize f(x,y) = (x**2)*y subject to x**2 + y**2 = 3"]
@@ -144,7 +144,7 @@ p6["nineq"] = 6
 p6["init"] = np.random.rand(6).astype(float_dtype)
 p6["ground_truth"] = [np.array([1.0/6.0]*6, dtype=float_dtype)]
 
-test_problems.append(p6)
+#test_problems.append(p6)
 
 p7 = dict()
 p7["text_statements"] = ["maximize f(x,y,z) = x*y*z subject to x+y+z = 1, x >= 0, y >= 0, z >= 0"]
@@ -156,7 +156,7 @@ p7["nineq"] = 3
 p7["init"] = np.random.randn(3).astype(float_dtype)
 p7["ground_truth"] = [np.array([1.0/3.0]*3, dtype=float_dtype)]
 
-test_problems.append(p7)
+#test_problems.append(p7)
 
 p8 = dict()
 p8["text_statements"] = ["minimize f(x,y,z) = 4*x-2*z subject to 2*x-y-z = 2, x**2 + y**2 = 1"]
@@ -171,7 +171,7 @@ p8["nineq"] = 0
 p8["init"] = np.random.randn(3).astype(float_dtype)
 p8["ground_truth"] = [np.array([2.0/np.sqrt(13.0), -3.0/np.sqrt(13.0), -2.0+7.0/np.sqrt(13.0)], dtype=float_dtype)]
 
-test_problems.append(p8)
+#test_problems.append(p8)
 
 p9 = dict()
 p9["text_statements"] = ["minimize f(x,y) = (x-2)**2 + 2*(y-1)**2 subject to x+4*y <= 3, x >= y"]
@@ -186,7 +186,7 @@ p9["nineq"] = 2
 p9["init"] = np.random.randn(2).astype(float_dtype)
 p9["ground_truth"] = [np.array([5.0/3.0, 1.0/3.0], dtype=float_dtype)]
 
-test_problems.append(p9)
+#test_problems.append(p9)
 
 p10 = dict()
 p10["text_statements"] = ["minimize f(x,y,z) = (x-1)**2 + 2*(y+2)**2 + 3*(z+3)**2 subject to z-y-x = 1, z-x**2 >= 0"]
@@ -237,20 +237,23 @@ for lbfgs in hess_type:
         match = False
         for i in range(len(state_blacklist)):
             blist = state_blacklist[i]
-            for j in range(len(blist)):
-                if state[j] == blist[j]:
+            if blist[0] == "BOTH":
+                pass
+            elif not lbfgs and blist[0] != "EXACT":
+                continue
+            elif lbfgs and blist[0] != "LBFGS":
+                continue
+            for j in range(len(blist)-1):
+                if state[j] == blist[j+1]:
                     match = True
-                elif blist[j] is not None:
+                elif blist[j+1] is not None:
                     match = False
                     break
             if match:
                 break
 
-        #if lbfgs and (d2f_state == "NULL" and d2ce_state == "NULL" and d2ci_state == "NULL"):
-        #    print state
-
-        #if lbfgs and not (d2f_state == "NULL" and d2ce_state == "NULL" and d2ci_state == "NULL"):
-        #    match = True
+        if lbfgs and not (d2f_state == "NULL" and d2ce_state == "NULL" and d2ci_state == "NULL"):
+            match = True
         if not lbfgs and (d2f_state == "NULL" or (ce_state != "NULL" and d2ce_state == "NULL") or (ci_state != "NULL" and d2ci_state == "NULL")):
             match = True
 

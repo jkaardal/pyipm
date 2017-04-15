@@ -8,7 +8,7 @@ from theano.tensor.slinalg import eigvalsh
 from theano.ifelse import ifelse
 
 class IPM:
-    """Solve nonlinear, nonconvex minimization problems using an interior-point method.
+    """Solve nonlinear, nonconvex optimization problems using an interior-point method.
 
 
        Detailed Description:
@@ -18,11 +18,11 @@ class IPM:
            min f(x)   subject to {ce(x) = 0} and {ci(x) >= 0}
             x
 
-         where f(x) is a continuously differentiable function of the weights x,
-         {ce(x) = 0} is the set of M equality constraints, and {ci(x) <= 0} is the
-         set of N inequality constraints. The solver finds a solution to an
-         'unconstrained' transformation of the problem by forming the Lagrangian
-         augmented by a barrier term with coefficient mu when N > 0:
+         where f(x) is a function of the weights x, {ce(x) = 0} is the set of M 
+         equality constraints, and {ci(x) <= 0} is the set of N inequality
+         constraints. The solver finds a solution to an 'unconstrained'
+         transformation of the problem by forming the Lagrangian augmented by a
+         barrier term with coefficient mu when N > 0:
 
            L(x,s,lda) = f - ce.dot(lda[:M]) - (ci-s).dot(lda[M:]) - mu*sum(log(s))
 
@@ -32,7 +32,9 @@ class IPM:
          the first-order Karush-Kuhn-Tucker (KKT) conditions are satisfied to the
          desired precision.
 
-         For more details on this algorithm, see the references at the bottom.
+         For more details on this algorithm, consult the references at the bottom.
+         In particular, this algorithm uses a line search interior-point 
+         algorithm with a merit function based on Ch. 19 of [1].
 
 
        Dependencies:
@@ -68,130 +70,148 @@ class IPM:
        Class Variables:
            x0 (NumPy array): weight initialization (size D).
            x_dev (Theano tensor): symbolic weight variables.
-           f (symbolic expression): objective function.
+           f (symbolic expression): objective/cost function; i.e. the function to be
+                 minimized.
                [Args] x_dev
-               [Returns] symbolic scalar/scalar
+               [Returns] symbolic scalar
+               [NOTE] see note 1) below.
            df (symbolic expression, OPTIONAL): gradient of the objective
-                 function with respect to (wrt) x_dev/x.
+                 function with respect to (wrt) x_dev.
                [Args] x_dev
                [Default] df is assigned through automatic symbolic differentiation
                  of f wrt x_dev
                [Returns] symbolic array (size D)
+               [NOTE] see note 1) below.
            d2f (symbolic expression, OPTIONAL): hessian of the objective function wrt
                  x_dev.
                [Args] x_dev
                [Default] d2f is assigned through automatic symbolic differentiation
                  of f wrt x_dev
-               [Returns] symbolic array (size DxD) 
+               [Returns] symbolic array (size DxD)
+               [NOTE] see notes 1) and 3) below.
            ce (Theano expression, OPTIONAL): symbolic expression for the equality
                  constraints as a function of x_dev. This is required if dce or
                  d2ce is not None.
                [Args] x_dev
                [Default] None
                [Returns] symbolic array (size M)
+               [NOTE] see note 1) below.
            dce (Theano expression, OPTIONAL): symbolic expression for the Jacobian
                  of the equality constraints wrt x_dev.
                [Args] x_dev
                [Default] if ce is not None, then dce is assigned through automatic
                  symbolic differentiation of ce wrt x_dev; otherwise None.
                [Returns] symbolic array (size DxM)
+               [NOTE] see notes 1) and 2) below.
            d2ce (Theano expression, OPTIONAL): symbolic expression for the Hessian
                  of the equality constraints wrt x_dev and lambda_dev (see below).
                [Args] x_dev, lambda_dev
                [Default] if ce is not None, then d2ce is assigned through automatic
                  symbolic differentiation of ce wrt x_dev; otherwise None.
                [Returns] symbolic array (size DxD)
+               [NOTE] see notes 1) and 3) below.
            ci (Theano expression, OPTIONAL): symbolic expression for the
                  inequality constraints as a function of x_dev. Required if dci or
                  d2ci are not None.
                [Args] x_dev
                [Default] None
                [Returns] symbolic array (size N)
+               [NOTE] see note 1) below.
            dci (Theano expression, OPTIONAL): symbolic expression for the Jacobian 
                  of the inequality constraints wrt x_dev.
                [Args] x_dev
                [Default] if ci is not None, then dci is assigned through automatic
                  symbolic differentiation of ci wrt x_dev; otherwise None
                [Returns] symbolic array (size DxN)
+               [NOTE] see notes 1) and 2) below.
            d2ci (Theano expression, OPTIONAL): symbolic expression for the Hessian
                  of the inequality constraints wrt x_dev and lambda_dev (see below).
                [Args] x_dev, lambda_dev
                [Default] if ci is not None, then d2ci is assigned through autormatic
                  symbolic differentiation of ci wrt x_dev; otherwise None
                [Returns] symbolic array (size DxD)
+               [NOTE] see notes 1) and 3) below.
            lda0 (NumPy array, OPTIONAL): Lagrange multiplier initialization (size
-                 M+N). For equality constraints, lda0 may take on any sign while for
-                 inequality constraints all elements of lda0 must be >=0.
-               [Default] if ce or ci is not None, then lda0 is initialized using (if
-                 ce is not None), dci (if ci is not None), and df all evaluated at
-                 x0 and the Moore-Penrose pseudoinverse; otherwise None
+                 M+N). For equality constraints, lda0[:M] may take on any sign while
+                 for inequality constraints all elements of lda0[M:] must be >=0.
+               [Default] if ce or ci is not None, then lda0 is initialized using dce
+                 (if ce is not None), dci (if ci is not None), and df all evaluated
+                 at x0 and the Moore-Penrose pseudoinverse; otherwise None
            lambda_dev (Theano expression, OPTIONAL) symbolic Lagrange multipliers.
                  This only required if you supply your own input for d2ce or d2ci.
                [Default] None
-           s0 (Numy array, OPTIONAL): slack variables initialization (size N).
-                 These are only set when inequality constraints are in use.
+           s0 (NumPy array, OPTIONAL): slack variables initialization (size N).
+                 These are only set when inequality constraints are in use. The
+                 slack varables must be s0 >= 0.
                [Default] if ci is not None, then s0 is set to the larger of ci
                  evaluated at x0 or Ktol; otherwise None
-           mu (float, OPTIONAL): barrier parameter (scalar>0).
+           mu (float, OPTIONAL): barrier parameter initialization (scalar>0).
                [Default] 0.2
-           nu (float, OPTIONAL): merit function barrier parameter (scalar>0).
+           nu (float, OPTIONAL): merit function parameter initialization (scalar>0).
                [Default] 10.0
-           rho (float, OPTIONAL): multiplicative factor for testing progress
-                 towards feasibility (scalar in (0,1)).
+           rho (float, OPTIONAL): factor used for testing and updating nu (scalar
+                 in (0,1)).
                [Default] 0.1.
-           tau (float, OPTIONAL): fraction to the boundary parameter (scalar in
-                 (0,1)).
+           tau (float, OPTIONAL): fraction-to-the-boundary rule and backtracking
+                 line search parameter (scalar in (0,1)).
                [Default] 0.995
-           eta (float, OPTIONAL): Armijo rule parameter (Wolfe conditions) (scalar in
-                 (0,1)).
+           eta (float, OPTIONAL): Armijo rule parameter (Wolfe conditions) (scalar
+                 in (0,1)).
                [Default] 1.0E-4
            beta (float, OPTIONAL): power factor used in Hessian regularization to
-                 combat ill-conditioning. This is only relevant if ce or ci is not
-                 None.
+                 combat ill-conditioning. This is only relevant if ce is not None.
                [Default] 0.4
-           miter (int, OPTIONAL): number of 'inner' iterations where mu and nu are
-                 held constant.
+           miter (int, OPTIONAL): number of 'inner' iterations where mu is held
+                 constant.
                [Default] 20
-           niter (int, OPTIONAL): number of 'outer' iterations where mu and nu are
+           niter (int, OPTIONAL): number of 'outer' iterations where mu is
                  adjusted.
                [Default] 10
-           Xtol (float, OPTIONAL): weight precision tolerance.
+           Xtol (float, OPTIONAL): weight precision tolerance (used only in
+                 fraction-to-the-boundary rule).
                [Default] np.finfo(float_dtype).eps (machine precision of
                  float_dtype; see below)
-           Ktol (float, OPTIONAL): convergence tolerance on the first order Karush-
-                 Kuhn-Tucker (KKT) conditions.
+           Ktol (float, OPTIONAL): convergence tolerance on the Karush-Kuhn-
+                 Tucker (KKT) conditions.
                [Default] 1.0E-4
-           Ftol (float, OPTIONAL): convergence tolerance on the change in the f
+           Ftol (float, OPTIONAL): convergence tolerance on the change in f
                  between iterations. For constrained problems, f is measured after
                  each outer iteration and compared to the prior outer iteration.
                [Default] None (when set to None, convergence is determined via the
                  KKT conditions alone).
            lbfgs (integer, OPTIONAL): solve using the L-BFGS approximation of the
-                 Hessian; can also set to False to use the exact Hessian.
+                 Hessian; set lbfgs to a positive integer equal to the number of
+                 past iterations to store. If lbfgs=0 or False, the exact Hessian
+                 will be used.
                [Default] False
-           lbfgs_zeta (float, OPTIONAL): initialize the scaling of the initial Hessian
-                 approximation with respect to the weights. The approximation is
-                 lbfgs_zeta multiplied by the identity matrix.
+           lbfgs_zeta (float, OPTIONAL): initialize the scaling of the initial
+                 Hessian approximation with respect to the weights. The initial
+                 approximation is lbfgs_zeta multiplied by a DxD identity matrix.
+                 This must be a positive scalar.
                [Default] 1.0
            float_dtype (dtype, OPTIONAL): set the universal precision of all float
                  variables.
                [Default] np.float64 (64-bit floats)
+               [NOTE] Using 32-bit precision is not recommended; the numerical
+                 inaccuracy can lead to slow convergence.
            verbosity (integer, OPTIONAL): screen output level from -1 to 3 where -1
                  is no feedback and 3 is maximum feedback.
                [Default] 1
 
-           Note that, for flexibility, symbolic expressions for f, df, d2f, ce, dce,
-           d2ce, ci, dci, and d2ci may be replaced with functions. Keep in mind,
-           however, that replacing f, ce, or ci with functions will disable automatic
+           Notes:
+           -----------------
+           1) For flexibility, symbolic expressions for f, df, d2f, ce, dce, d2ce, ci
+           dci, and d2ci may be replaced with functions. Keep in mind, however, that
+           replacing f, ce, or ci with functions will disable automatic
            differentiation capabilities. This option is available for those who wish 
            to avoid redefining Theano functions that have already been compiled.
            However, using symbolic expressions may lead to a quicker optimization.
            
-           When defining your own Jacobians, dce and dci, keep in mind that dce and
+           2) When defining your own Jacobians, dce and dci, keep in mind that dce and
            dci are transposed relative to the output of Theano.gradient.jacobian()
            and should be size DxM or DxN, respectively.
 
-           Depending on the sophistication of the problem you wish to optimize, it
+           3) Depending on the sophistication of the problem you wish to optimize, it
            may be better write your own symbolic expression/function for the second
            derivative matrices d2f, d2ce, or/and d2ci. On some complicated and large
            problems, automatic differentiation of the second derivatives may be
@@ -320,6 +340,8 @@ class IPM:
         self.lbfgs = lbfgs
         if self.lbfgs and lbfgs_zeta is None:
             self.lbfgs_zeta = float_dtype(1.0)
+        else:
+            self.lbfgs_zeta = lbfgs_zeta
         self.lbfgs_fail_max = lbfgs
 
         self.verbosity = verbosity
@@ -350,15 +372,28 @@ class IPM:
         assert self.f is not None
         assert (self.ce is not None) or (self.ce is None and self.dce is None and self.d2ce is None)
         assert (self.ci is not None) or (self.ci is None and self.dci is None and self.d2ci is None)
-
+        assert self.mu > 0.0
+        assert self.nu > 0.0
+        assert self.eta > 0.0 and self.eta < 1.0
+        assert self.rho > 0.0 and self.rho < 1.0
+        assert self.tau > 0.0 and self.tau < 1.0
+        assert self.beta < 1.0
+        assert self.miter >= 0 and isinstance(self.miter, int)
+        assert self.niter >= 0 and isinstance(self.miter, int)
+        assert self.Xtol >= self.eps
+        assert self.Ktol >= self.eps
+        assert self.Ftol is None or self.Ftol >= 0.0
+        assert self.lbfgs >= 0 or self.lbfgs == False
+        if self.lbfgs:
+            assert isinstance(self.lbfgs, int)
+        assert self.lbfgs_zeta is None or self.lbfgs_zeta > 0.0
+        
         
     def compile(self, nvar=None, neq=None, nineq=None):
         """Validate some of the input variables and compile the objective function,
            the gradient, and the Hessian with constraints.
 
         """
-
-        self.validate()
 
         # get number of variables and constraints
         if nvar is not None:
@@ -1393,6 +1428,9 @@ class IPM:
         self.nvar = self.x0.size
         # cast weights to float_dtype
         self.x0 = self.float_dtype(self.x0)
+
+        # validate class members
+        self.validate()
 
         # if expressions are not compiled or force_recompile=True, compile expressions into functions
         if not self.compiled or force_recompile:

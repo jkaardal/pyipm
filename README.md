@@ -151,7 +151,7 @@ x, s, lda, fval, kkt = problem.solve(x0=x0)
 ```
 
 where the weight initialization x0 must be set here if it had not been
-set during initialization of the problem. The outputs of solver() are:
+set during initialization of the problem. The outputs of solve() are:
 
 x = the best solution found for the weights (NumPy array)
 s = the slack variables (NumPy array; empty if there are no inequality

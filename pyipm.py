@@ -1240,7 +1240,7 @@ class IPM:
         # compute eigenvalues and condition number
         w = self.eigh(Hc)
         rcond = np.min(np.abs(w))/np.max(np.abs(w))
-            
+
         if rcond <= self.eps or (self.neq + self.nineq) != np.sum(w < -self.eps):
             # if the Hessian is ill-conditioned or the matrix inertia is undesireable, regularize the Hessian
             if rcond <= self.eps and self.neq:
@@ -1341,7 +1341,7 @@ class IPM:
                         dz_p = -np.linalg.lstsq(A, c_new)[0]
                     if self.phi(x0 + alpha_smax*dx + dz_p[:self.nvar], s0 + alpha_smax*ds + dz_p[self.nvar:]) <= phi0 + alpha_smax*self.eta*dphi0:
                         alpha_corr = self.step(s0, alpha_smax*ds + dz_p[self.nvar:])
-                        if self.phi(x0 + alpha_corr*(alpha_smax*dx + dz_p[:self.nvar]), s0 + alpha_corr*(alpha_smax*ds + dz_p[self.nvar:])) <= phi0 + alpha_corr*self.eta*self.dphi(x0, s0, alpha_smax*np.concatenate([dx, ds], axis=0) + dz_p):
+                        if self.phi(x0 + alpha_corr*(alpha_smax*dx + dz_p[:self.nvar]), s0 + alpha_corr*(alpha_smax*ds + dz_p[self.nvar:])) <= phi0 + alpha_smax*self.eta*self.dphi0:
                             if self.verbosity > 2:
                                 print "Second-order feasibility correction accepted"
                             # correction accepted
@@ -1352,6 +1352,12 @@ class IPM:
                     alpha_lmax *= self.tau
                     while self.phi(x0 + alpha_smax*dx, s0 + alpha_smax*ds) > phi0 + alpha_smax*self.eta*dphi0:
                         # backtracking line search
+                        if np.sqrt(np.linalg.norm(alpha_smax*dx) ** 2 + np.linalg.norm(alpha_lmax*ds) ** 2) < self.eps:
+                            # search direction is unreliable to machine precision, stop solver
+                            if self.verbosity > 2:
+                                print "Search direction is unreliable to machine precision."
+                            self.signal = -2
+                            return (x0, s0, lda0)
                         alpha_smax *= self.tau
                         alpha_lmax *= self.tau
             # update slack variables
@@ -1387,6 +1393,12 @@ class IPM:
                     alpha_lmax *= self.tau
                     while self.phi(x0 + alpha_smax*dx, s0) > phi0 + alpha_smax*self.eta*dphi0:
                         # backtracking line search
+                        if np.linalg.norm(alpha_smax*dx) < self.eps:
+                            # search direction is unreliable to machine precision, stop solver
+                            if self.verbosity > 2:
+                                print "Search direction is unreliable to machine precision."
+                            self.signal = -2
+                            return (x0, s0, lda0)
                         alpha_smax *= self.tau
                         alpha_lmax *= self.tau
         # update weights
@@ -1491,11 +1503,15 @@ class IPM:
         Ktol_converged = False
         Ftol_converged = False
 
+        # initialize optimization return signal
+        self.signal = 0
+        
         for outer in range(self.niter):
             # begin outer iterations where the barrier parameter is adjusted
 
             # determine if the current point has converged to Ktol precision using KKT conditions; if True, solution found
             if np.linalg.norm(kkt[0]) <= self.Ktol and np.linalg.norm(kkt[1]) <= self.Ktol and np.linalg.norm(kkt[2]) <= self.Ktol and np.linalg.norm(kkt[3]) <= self.Ktol:
+                self.signal = 1
                 Ktol_converged = True 
                 break
 
@@ -1509,6 +1525,7 @@ class IPM:
                 muTol = np.max([self.Ktol, self.mu_host])
                 if np.linalg.norm(kkt[0]) <= muTol and np.linalg.norm(kkt[1]) <= muTol and np.linalg.norm(kkt[2]) <= muTol and np.linalg.norm(kkt[3]) <= muTol:
                     if not self.neq and not self.nineq:
+                        self.signal = 1
                         Ktol_converged = True
                     break
 
@@ -1567,26 +1584,32 @@ class IPM:
                 # calculate the updated KKT conditions
                 kkt = self.KKT(x, s, lda)
 
-                if self.Ftol is not None and not self.nineq:
+                if self.Ftol is not None and not self.nineq and self.signal != -2:
                     # for unconstrained and equality constraints only, calculate new cost and check Ftol convergence
-                    f_new = self.cost(x)               
+                    f_new = self.cost(x)
                     if np.abs(f_past-f_new) <= np.abs(self.Ftol):
                         # converged to Ftol precision
+                        self.signal = 2
                         Ftol_converged = True
                         break
                     else:
                         # did not converge, update past cost
                         f_past = f_new
 
+                if self.signal == -2:
+                    # a bad search direction was chosen, terminating
+                    break
+
                 if inner >= self.miter-1:
                     if self.verbosity > 0 and self.nineq:
                         print "MAXIMUM INNER ITERATIONS EXCEEDED"
 
-            if self.Ftol is not None and self.nineq:
+            if self.Ftol is not None and self.nineq and self.signal != -2:
                 # when problem has inequality constraints, calculate new cost and check Ftol convergence
                 f_new = self.cost(x)
                 if np.abs(f_past-f_new) <= np.abs(self.Ftol):
                     # converged to Ftol precision
+                    self.signal = 2
                     Ftol_converged = True
                 else:
                     # did not converge, update past cost
@@ -1596,7 +1619,12 @@ class IPM:
                 # if Ftol convergence reached, break because solution has been found
                 break
 
+            if self.signal == -2:
+                # a bad search direction was chosen, terminating
+                break
+                
             if outer >= self.niter-1:
+                self.signal = -1
                 if self.verbosity > 0:
                     if self.nineq:
                         print "MAXIMUM OUTER ITERATIONS EXCEEDED"
@@ -1621,7 +1649,9 @@ class IPM:
         self.fval = self.cost(x)
 
         if self.verbosity >= 0:
-            if np.linalg.norm(kkt[0]) <= self.Ktol and np.linalg.norm(kkt[1]) <= self.Ktol and np.linalg.norm(kkt[2]) <= self.Ktol and np.linalg.norm(kkt[3]) <= self.Ktol:
+            if self.signal == -2:
+                msg = "Terminated due to bad direction in backtracking line search "
+            elif np.linalg.norm(kkt[0]) <= self.Ktol and np.linalg.norm(kkt[1]) <= self.Ktol and np.linalg.norm(kkt[2]) <= self.Ktol and np.linalg.norm(kkt[3]) <= self.Ktol:
                 msg = "Converged to Ktol tolerance "
             elif self.Ftol is not None and Ftol_converged:
                 msg = "Converged to Ftol tolerance "
@@ -1774,7 +1804,7 @@ def main():
         x, s, lda, fval, kkt = p.solve()
 
         print ""
-        print "Ground truth: global max. @ [x, y] = [" + str(float_dtype(np.sqrt(2.0))) + ", " + str(float_dtype(1.0)) + "] or [" + str(-float_dtype(np.sqrt(2.0))) + ", " + str(float_dtype(1.0)) + "], local max @ [x_gt, y_gt] = [0.0, " + str(-float_dtype(np.sqrt(3))) + "]"
+        print "Ground truth: global max. @ [x, y] = [" + str(float_dtype(np.sqrt(2.0))) + ", " + str(float_dtype(1.0)) + "] or [" + str(-float_dtype(np.sqrt(2.0))) + ", " + str(float_dtype(1.0)) + "], local max. @ [x_gt, y_gt] = [0.0, " + str(-float_dtype(np.sqrt(3))) + "]"
         print "Solver solution: [x, y] = [" + str(x[0]) + ", " + str(x[1]) + "]"
         print "Lagrange multiplier: lda = " + str(lda)
         print "f(x,y) = " + str(-fval)

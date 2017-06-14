@@ -1341,7 +1341,7 @@ class IPM:
                         dz_p = -np.linalg.lstsq(A, c_new)[0]
                     if self.phi(x0 + alpha_smax*dx + dz_p[:self.nvar], s0 + alpha_smax*ds + dz_p[self.nvar:]) <= phi0 + alpha_smax*self.eta*dphi0:
                         alpha_corr = self.step(s0, alpha_smax*ds + dz_p[self.nvar:])
-                        if self.phi(x0 + alpha_corr*(alpha_smax*dx + dz_p[:self.nvar]), s0 + alpha_corr*(alpha_smax*ds + dz_p[self.nvar:])) <= phi0 + alpha_smax*self.eta*self.dphi0:
+                        if self.phi(x0 + alpha_corr*(alpha_smax*dx + dz_p[:self.nvar]), s0 + alpha_corr*(alpha_smax*ds + dz_p[self.nvar:])) <= phi0 + alpha_smax*self.eta*dphi0:
                             if self.verbosity > 2:
                                 print "Second-order feasibility correction accepted"
                             # correction accepted

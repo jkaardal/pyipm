@@ -1015,7 +1015,7 @@ class IPM:
                     W = T.concatenate([W, T.zeros((self.nineq, 2 * m_lbfgs))], axis=0)
 
                 # calculate -Z^(-1)*U*(U^T*Z^(-1)*U - M)^(-1)*U^T*Z^(-1)*g (skipped if m_lbgs=0)
-                invB_W = sym_xolve(B, W)
+                invB_W = sym_solve(self.B_dev, W)
                 M0 = T.concatenate([self.zeta_dev * self.SS_dev, self.L_dev], axis=1)
                 M1 = T.concatenate([self.L_dev.T, -self.D_dev], axis=1)
                 Minv = T.concatenate([M0, M1], axis=0)
@@ -1100,7 +1100,7 @@ class IPM:
             # combine -gma*I*g and -W*Q*W.T*g
             dz = ifelse(T.gt(m_lbfgs, 0), Hg + Hg_update, Hg)
 
-        if self.nvar+self.nineq == self.neq+self.nineq:
+        if self.nvar + self.nineq == self.neq + self.nineq:
             # if constraints Jacobian is square, return both rank-deficient and full-rank search direction expressions
             return dz, dz_sqr
         else:

@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 import theano
 import theano.tensor as T
 import numpy as np
@@ -7,8 +9,9 @@ from theano.tensor.nlinalg import eigh
 from theano.tensor.slinalg import eigvalsh
 from theano.ifelse import ifelse
 
+
 class IPM:
-    """Solve nonlinear, nonconvex optimization problems using an interior-point method.
+    '''Solve nonlinear, nonconvex optimization problems using an interior-point method.
 
 
        Detailed Description:
@@ -24,7 +27,7 @@ class IPM:
          transformation of the problem by forming the Lagrangian augmented by a
          barrier term with coefficient mu when N > 0:
 
-           L(x,s,lda) = f - ce.dot(lda[:M]) - (ci-s).dot(lda[M:]) - mu*sum(log(s))
+           L(x, s, lda) = f - ce.dot(lda[:M]) - (ci-s).dot(lda[M:]) - mu * sum(log(s))
 
          where s >= 0 are the slack variables (only used when N > 0) that transform
          the inequality constraints into equality constraints and lda are the
@@ -293,14 +296,12 @@ class IPM:
         
 
            TO DO: Translate line-search into Theano
+    '''
 
-
-    """
-
-    def __init__(self, x0=None, x_dev=None, f=None, df=None, d2f=None, ce=None, dce=None, d2ce=None, ci=None, dci=None, d2ci=None,
-            lda0=None, lambda_dev=None, s0=None, mu=0.2, nu=10.0, rho=0.1, tau=0.995, eta=1.0E-4, beta=0.4,
-            miter=20, niter=10, Xtol=None, Ktol=1.0E-4, Ftol=None, lbfgs=False, lbfgs_zeta=None, float_dtype=np.float64,
-            verbosity=1):
+    def __init__(self, x0=None, x_dev=None, f=None, df=None, d2f=None, ce=None, dce=None, d2ce=None, ci=None, dci=None,
+                 d2ci=None, lda0=None, lambda_dev=None, s0=None, mu=0.2, nu=10.0, rho=0.1, tau=0.995, eta=1.0E-4,
+                 beta=0.4, miter=20, niter=10, Xtol=None, Ktol=1.0E-4, Ftol=None, lbfgs=False, lbfgs_zeta=None,
+                 float_dtype=np.float64, verbosity=1):
 
         self.x0 = x0
         self.x_dev = x_dev
@@ -317,6 +318,10 @@ class IPM:
         self.ci = ci
         self.dci = dci
         self.d2ci = d2ci
+
+        self.nvar = None
+        self.neq = None
+        self.nineq = None
 
         self.eps = np.finfo(float_dtype).eps
 
@@ -353,30 +358,25 @@ class IPM:
 
         self.compiled = False
 
-        
-    def check_precompile(self, func):
-        """Check if the Theano expression is actually a Theano function. If so,
+    @staticmethod
+    def check_precompile(func):
+        '''Check if the Theano expression is actually a Theano function. If so,
            return True, otherwise return False.
-
-        """
-
+        '''
         return isinstance(func, theano.compile.function_module.Function)
 
-    
     def validate(self):
-        """Validate inputs
-
-        """
-        
+        '''Validate inputs
+        '''
         assert self.x_dev is not None
         assert self.f is not None
         assert (self.ce is not None) or (self.ce is None and self.dce is None and self.d2ce is None)
         assert (self.ci is not None) or (self.ci is None and self.dci is None and self.d2ci is None)
         assert self.mu > 0.0
         assert self.nu > 0.0
-        assert self.eta > 0.0 and self.eta < 1.0
-        assert self.rho > 0.0 and self.rho < 1.0
-        assert self.tau > 0.0 and self.tau < 1.0
+        assert 0.0 < self.eta < 1.0
+        assert 0.0 < self.rho < 1.0
+        assert 0.0 < self.tau < 1.0
         assert self.beta < 1.0
         assert self.miter >= 0 and isinstance(self.miter, int)
         assert self.niter >= 0 and isinstance(self.miter, int)
@@ -387,14 +387,11 @@ class IPM:
         if self.lbfgs:
             assert isinstance(self.lbfgs, int)
         assert self.lbfgs_zeta is None or self.lbfgs_zeta > 0.0
-        
-        
+
     def compile(self, nvar=None, neq=None, nineq=None):
-        """Validate some of the input variables and compile the objective function,
+        '''Validate some of the input variables and compile the objective function,
            the gradient, and the Hessian with constraints.
-
-        """
-
+        '''
         # get number of variables and constraints
         if nvar is not None:
             self.nvar = nvar
@@ -417,7 +414,8 @@ class IPM:
         ci_precompile = self.check_precompile(self.ci)
         dci_precompile = self.check_precompile(self.dci)
         d2ci_precompile = self.check_precompile(self.d2ci)
-        if f_precompile or df_precompile or d2f_precompile or ce_precompile or dce_precompile or d2ce_precompile or ci_precompile or dci_precompile or d2ci_precompile:
+        if any([f_precompile, df_precompile, d2f_precompile, ce_precompile, dce_precompile, d2ce_precompile,
+                ci_precompile, dci_precompile, d2ci_precompile]):
             precompile = True
         else:
             precompile = False
@@ -427,7 +425,7 @@ class IPM:
             if ce_precompile:
                 CE = self.ce
             else:
-                CE = theano.function(inputs = [self.x_dev], outputs = self.ce)
+                CE = theano.function(inputs=[self.x_dev], outputs=self.ce)
 
             c = CE(self.x0)
             self.neq = c.size
@@ -440,7 +438,7 @@ class IPM:
             if ci_precompile:
                 CI = self.ci
             else:
-                CI = theano.function(inputs = [self.x_dev], outputs = self.ci)
+                CI = theano.function(inputs=[self.x_dev], outputs=self.ci)
 
             c = CI(self.x0)
             self.nineq = c.size
@@ -457,8 +455,8 @@ class IPM:
         self.b_dev = T.matrix('b_dev')
         self.dz_dev = T.vector('dz_dev')
 
-        self.mu_dev = theano.shared(self.float_dtype(self.mu), name="mu_dev")
-        self.nu_dev = theano.shared(self.float_dtype(self.nu), name="nu_dev")
+        self.mu_dev = theano.shared(self.float_dtype(self.mu), name='mu_dev')
+        self.nu_dev = theano.shared(self.float_dtype(self.nu), name='nu_dev')
 
         # use automatic differentiation if gradient and/or Hessian (if applicable) of f expressions are not provided
         if self.df is None:
@@ -478,7 +476,7 @@ class IPM:
                 dce = self.dce
             if not self.lbfgs: 
                 if self.d2ce is None:
-                    d2ce = theano.gradient.hessian(cost=T.sum(self.ce*self.lambda_dev[:self.neq]), wrt=self.x_dev)
+                    d2ce = theano.gradient.hessian(cost=T.sum(self.ce * self.lambda_dev[:self.neq]), wrt=self.x_dev)
                 else:
                     d2ce = self.d2ce
 
@@ -490,7 +488,7 @@ class IPM:
                 dci = self.dci
             if not self.lbfgs:
                 if self.d2ci is None:
-                    d2ci = theano.gradient.hessian(cost=T.sum(self.ci*self.lambda_dev[self.neq:]), wrt=self.x_dev)
+                    d2ci = theano.gradient.hessian(cost=T.sum(self.ci * self.lambda_dev[self.neq:]), wrt=self.x_dev)
                 else:
                     d2ci = self.d2ci
 
@@ -525,9 +523,9 @@ class IPM:
                         d2ce_func = d2ce
             if self.nineq:
                 if not ci_precompile:
-                    ci_func = theano.function(inputs=[self.x_dev, self.s_dev], outputs=self.ci-self.s_dev)
+                    ci_func = theano.function(inputs=[self.x_dev, self.s_dev], outputs=self.ci - self.s_dev)
                 else:
-                    ci_func = lambda x, s: self.ci(x)-s
+                    ci_func = lambda x, s: self.ci(x) - s
                 if not dci_precompile:
                     dci_func = theano.function(inputs=[self.x_dev], outputs=dci.reshape((self.nvar, self.nineq)))
                 else:
@@ -542,41 +540,47 @@ class IPM:
         if self.neq or self.nineq:
             if precompile:
                 if self.neq and self.nineq:
-                    con = lambda x, s: np.concatenate([ce_func(x).reshape((self.neq,)), ci_func(x, s).reshape((self.nineq,))], axis=0)
+                    con = lambda x, s: np.concatenate([ce_func(x).reshape((self.neq,)),
+                                                       ci_func(x, s).reshape((self.nineq,))], axis=0)
                 elif self.neq:
                     con = lambda x, s: ce_func(x).reshape((self.neq,))
                 else:
                     con = lambda x, s: ci_func(x, s).reshape((self.nineq,))
             else:
-                con = T.zeros((self.neq+self.nineq,))
+                con = T.zeros((self.neq + self.nineq,))
                 if self.neq:
                     con = T.set_subtensor(con[:self.neq], self.ce)
                 if self.nineq:
-                    con = T.set_subtensor(con[self.neq:], self.ci-self.s_dev)
+                    con = T.set_subtensor(con[self.neq:], self.ci - self.s_dev)
 
         # construct composite expression for the constraints Jacobian
         if self.neq or self.nineq:
             if precompile:
                 if self.neq and self.nineq:
-                    jaco_top = lambda x: np.concatenate([dce_func(x).reshape((self.nvar, self.neq)), dci_func(x).reshape((self.nvar, self.nineq))], axis=1)
+                    jaco_top = lambda x: np.concatenate([dce_func(x).reshape((self.nvar, self.neq)),
+                                                         dci_func(x).reshape((self.nvar, self.nineq))], axis=1)
                     jaco_bottom = np.concatenate([np.zeros((self.nineq, self.neq)), -np.eye(self.nineq)], axis=1)
                     jaco = lambda x: np.concatenate([jaco_top(x), jaco_bottom], axis=0)
                 elif self.neq:
                     jaco = lambda x: dce_func(x).reshape((self.nvar, self.neq))
                 else:
-                    jaco = lambda x: np.concatenate([dci_func(x).reshape((self.nvar, self.nineq)), -np.eye(self.nineq)], axis=0)
+                    jaco = lambda x: np.concatenate([
+                        dci_func(x).reshape((self.nvar, self.nineq)),
+                        -np.eye(self.nineq)
+                    ], axis=0)
             else:
-                jaco = T.zeros((self.nvar+self.nineq, self.neq+self.nineq))
+                jaco = T.zeros((self.nvar + self.nineq, self.neq + self.nineq))
                 if self.neq:
-                    jaco = T.set_subtensor(jaco[:self.nvar,:self.neq], dce)
+                    jaco = T.set_subtensor(jaco[:self.nvar, :self.neq], dce)
                 if self.nineq:
-                    jaco = T.set_subtensor(jaco[:self.nvar,self.neq:], dci)
-                    jaco = T.set_subtensor(jaco[self.nvar:,self.neq:], -T.eye(self.nineq))
+                    jaco = T.set_subtensor(jaco[:self.nvar, self.neq:], dci)
+                    jaco = T.set_subtensor(jaco[self.nvar:, self.neq:], -T.eye(self.nineq))
 
         # construct expression for the gradient
         if precompile:
             if self.neq and self.nineq:
-                grad_x = lambda x, lda: df_func(x) - np.dot(dce_func(x), lda[:self.neq]) - np.dot(dci_func(x), lda[self.neq:])
+                grad_x = lambda x, lda: (df_func(x) - np.dot(dce_func(x), lda[:self.neq]) -
+                                         np.dot(dci_func(x), lda[self.neq:]))
             elif self.neq:
                 grad_x = lambda x, lda: df_func(x) - np.dot(dce_func(x), lda)
             elif self.nineq:
@@ -585,109 +589,131 @@ class IPM:
                 grad_x = lambda x, lda: df_func(x)
 
             if self.nineq:
-                grad_s = self.lambda_dev[self.neq:] - self.mu_dev/(self.s_dev+self.eps)
-                grad_s = theano.function(inputs=[self.x_dev, self.s_dev, self.lambda_dev], outputs=grad_s, on_unused_input='ignore')
+                grad_s = self.lambda_dev[self.neq:] - self.mu_dev / (self.s_dev + self.eps)
+                grad_s = theano.function(inputs=[self.x_dev, self.s_dev, self.lambda_dev], outputs=grad_s,
+                                         on_unused_input='ignore')
 
             if self.neq:
                 if ce_precompile:
                     grad_lda_eq = lambda x: ce_func(x).ravel()
                 else:
-                    grad_lda_eq = theano.function(inputs=[self.x_dev], outputs=self.ce.ravel(), on_unused_input='ignore')
+                    grad_lda_eq = theano.function(inputs=[self.x_dev], outputs=self.ce.ravel(),
+                                                  on_unused_input='ignore')
 
             if self.nineq:
                 if ci_precompile:
                     grad_lda_ineq = lambda x, s: ci_func(x, s).ravel()
                 else:
-                    grad_lda_ineq = theano.function(inputs=[self.x_dev, self.s_dev], outputs=(self.ci-self.s_dev).ravel(), on_unused_input='ignore')
+                    grad_lda_ineq = theano.function(inputs=[self.x_dev, self.s_dev],
+                                                    outputs=(self.ci - self.s_dev).ravel(), on_unused_input='ignore')
 
             if self.neq and self.nineq:
-                grad = lambda x, s, lda: np.concatenate([grad_x(x, lda), grad_s(x, s, lda), grad_lda_eq(x), grad_lda_ineq(x, s)], axis=0)
+                grad = lambda x, s, lda: np.concatenate([grad_x(x, lda), grad_s(x, s, lda), grad_lda_eq(x),
+                                                         grad_lda_ineq(x, s)], axis=0)
             elif self.neq:
                 grad = lambda x, s, lda: np.concatenate([grad_x(x, lda), grad_lda_eq(x)], axis=0)
             elif self.nineq:
-                grad = lambda x, s, lda: np.concatenate([grad_x(x, lda), grad_s(x, s, lda), grad_lda_ineq(x, s)], axis=0)
+                grad = lambda x, s, lda: np.concatenate([grad_x(x, lda), grad_s(x, s, lda), grad_lda_ineq(x, s)],
+                                                        axis=0)
             else:
                 grad = lambda x, s, lda: grad_x(x, lda)
         else:
-            grad = T.zeros((self.nvar+2*self.nineq+self.neq,))
+            grad = T.zeros((self.nvar + 2*self.nineq + self.neq,))
             grad = T.set_subtensor(grad[:self.nvar], df)
             if self.neq:
                 grad = T.inc_subtensor(grad[:self.nvar], -T.dot(dce, self.lambda_dev[:self.neq]))
-                grad = T.set_subtensor(grad[self.nvar+self.nineq:self.nvar+self.nineq+self.neq], self.ce)
+                grad = T.set_subtensor(grad[self.nvar + self.nineq:self.nvar + self.nineq + self.neq], self.ce)
             if self.nineq:
                 grad = T.inc_subtensor(grad[:self.nvar], -T.dot(dci, self.lambda_dev[self.neq:]))
-                grad = T.set_subtensor(grad[self.nvar:self.nvar+self.nineq], self.lambda_dev[self.neq:]-self.mu_dev/(self.s_dev+self.eps))
-                grad = T.set_subtensor(grad[self.nvar+self.nineq+self.neq:], self.ci-self.s_dev)
+                grad = T.set_subtensor(grad[self.nvar:self.nvar + self.nineq], self.lambda_dev[self.neq:] -
+                                       self.mu_dev / (self.s_dev + self.eps))
+                grad = T.set_subtensor(grad[self.nvar + self.nineq + self.neq:], self.ci - self.s_dev)
 
         # construct expressions for the merit function
         if precompile:
             if self.nineq:
-                bar_func = self.mu_dev*T.sum(T.log(self.s_dev))
+                bar_func = self.mu_dev * T.sum(T.log(self.s_dev))
                 bar_func = theano.function(inputs=[self.s_dev], outputs=bar_func, on_unused_input='ignore')
             if self.neq and self.nineq:
-                phi = lambda x, s: f_func(x) + self.nu_dev.get_value()*(np.sum(np.abs(ce_func(x))) + np.sum(np.abs(ci_func(x, s)))) - bar_func(s)
+                phi = lambda x, s: (f_func(x) + self.nu_dev.get_value() *
+                                    (np.sum(np.abs(ce_func(x))) + np.sum(np.abs(ci_func(x, s)))) - bar_func(s))
             elif self.neq:
-                phi = lambda x, s: f_func(x) + self.nu_dev.get_value()*np.sum(np.abs(ce_func(x)))
+                phi = lambda x, s: f_func(x) + self.nu_dev.get_value() * np.sum(np.abs(ce_func(x)))
             elif self.nineq:
-                phi = lambda x, s: f_func(x) + self.nu_dev.get_value()*np.sum(np.abs(ci_func(x, s))) - bar_func(s)
+                phi = lambda x, s: f_func(x) + self.nu_dev.get_value() * np.sum(np.abs(ci_func(x, s))) - bar_func(s)
             else:
                 phi = lambda x, s: f_func(x)
         else:
             phi = self.f
             if self.neq:
-                phi += self.nu_dev*T.sum(T.abs_(self.ce))
+                phi += self.nu_dev * T.sum(T.abs_(self.ce))
             if self.nineq:
-                phi += self.nu_dev*T.sum(T.abs_(self.ci-self.s_dev)) - self.mu_dev*T.sum(T.log(self.s_dev))
+                phi += self.nu_dev * T.sum(T.abs_(self.ci - self.s_dev)) - self.mu_dev * T.sum(T.log(self.s_dev))
 
         # construct expressions for the merit function gradient
         if precompile:
             if self.nineq:
-                dbar_func = T.dot(self.mu_dev/(self.s_dev+self.eps), self.dz_dev[self.nvar:])
-                dbar_func = theano.function(inputs=[self.s_dev, self.dz_dev], outputs=dbar_func, on_unused_input='ignore')
+                dbar_func = T.dot(self.mu_dev / (self.s_dev + self.eps), self.dz_dev[self.nvar:])
+                dbar_func = theano.function(inputs=[self.s_dev, self.dz_dev], outputs=dbar_func,
+                                            on_unused_input='ignore')
             if self.neq and self.nineq:
-                dphi = lambda x, s, dz: np.dot(df_func(x), dz[:self.nvar]) - self.nu_dev.get_value()*(np.sum(np.abs(ce_func(x))) + np.sum(np.abs(ci_func(x, s)))) - dbar_func(s, dz)
+                dphi = lambda x, s, dz: (np.dot(df_func(x), dz[:self.nvar]) - self.nu_dev.get_value() *
+                                         (np.sum(np.abs(ce_func(x))) + np.sum(np.abs(ci_func(x, s)))) -
+                                         dbar_func(s, dz))
             elif self.neq:
-                dphi = lambda x, s, dz: np.dot(df_func(x), dz[:self.nvar]) - self.nu_dev.get_value()*np.sum(np.abs(ce_func(x)))
+                dphi = lambda x, s, dz: (np.dot(df_func(x), dz[:self.nvar]) -
+                                         self.nu_dev.get_value() * np.sum(np.abs(ce_func(x))))
             elif self.nineq:
-                dphi = lambda x, s, dz: np.dot(df_func(x), dz[:self.nvar]) - self.nu_dev.get_value()*np.sum(np.abs(ci_func(x, s))) - dbar_func(s, dz)
+                dphi = lambda x, s, dz: (np.dot(df_func(x), dz[:self.nvar]) - self.nu_dev.get_value() *
+                                         np.sum(np.abs(ci_func(x, s))) - dbar_func(s, dz))
             else:
                 dphi = lambda x, s, dz: np.dot(df_func(x), dz[:self.nvar])
         else:
             dphi = T.dot(df, self.dz_dev[:self.nvar])        
             if self.neq:
-                dphi -= self.nu_dev*T.sum(T.abs_(self.ce))
+                dphi -= self.nu_dev * T.sum(T.abs_(self.ce))
             if self.nineq:
-                dphi -= self.nu_dev*T.sum(T.abs_(self.ci-self.s_dev)) + T.dot(self.mu_dev/(self.s_dev+self.eps), self.dz_dev[self.nvar:])
+                dphi -= (self.nu_dev * T.sum(T.abs_(self.ci - self.s_dev)) +
+                         T.dot(self.mu_dev / (self.s_dev + self.eps), self.dz_dev[self.nvar:]))
 
         # construct expression for initializing the Lagrange multipliers
         if self.neq or self.nineq:
             if precompile:
-                init_lambda = lambda x: np.dot(np.linalg.pinv(jaco(x)[:self.nvar,:]), df_func(x).reshape((self.nvar,1))).reshape((self.neq+self.nineq,))
+                init_lambda = lambda x: np.dot(np.linalg.pinv(jaco(x)[:self.nvar, :]),
+                                               df_func(x).reshape((self.nvar, 1))).reshape((self.neq + self.nineq,))
             else:
-                init_lambda = T.dot(pinv(jaco[:self.nvar,:]), df.reshape((self.nvar,1))).reshape((self.neq+self.nineq,))
+                init_lambda = T.dot(pinv(jaco[:self.nvar, :]),
+                                    df.reshape((self.nvar, 1))).reshape((self.neq + self.nineq,))
 
         # construct expression for initializing the slack variables
         if self.nineq:
             if precompile:
-                init_slack = lambda x: np.max(np.concatenate([ci_func(x, np.zeros((self.nineq,))).reshape((self.nineq,1)), self.Ktol*np.ones((self.nineq, 1))], axis=1), axis=1)
+                init_slack = lambda x: np.max(np.concatenate([
+                    ci_func(x, np.zeros((self.nineq,))).reshape((self.nineq, 1)),
+                    self.Ktol * np.ones((self.nineq, 1))
+                ], axis=1), axis=1)
             else:
-                init_slack = T.max(T.concatenate([self.ci.reshape((self.nineq,1)), self.Ktol*T.ones((self.nineq, 1))], axis=1), axis=1)
+                init_slack = T.max(T.concatenate([
+                    self.ci.reshape((self.nineq, 1)),
+                    self.Ktol * T.ones((self.nineq, 1))
+                ], axis=1), axis=1)
 
         # construct expression for gradient of f( + the barrier function)
         if precompile:
             if self.nineq:
-                dbar_func2 = -self.mu_dev/(self.s_dev+self.eps)
+                dbar_func2 = -self.mu_dev / (self.s_dev + self.eps)
                 dbar_func2 = theano.function(inputs=[self.s_dev], outputs=dbar_func2, on_unused_input='ignore')
                 barrier_cost_grad = lambda x, s: np.concatenate([df_func(x), dbar_func2(s)], axis=0)
             else:
                 barrier_cost_grad = lambda x, s: df_func(x)
         else:
-            barrier_cost_grad = T.zeros((self.nvar+self.nineq,))
+            barrier_cost_grad = T.zeros((self.nvar + self.nineq,))
             barrier_cost_grad = T.set_subtensor(barrier_cost_grad[:self.nvar], df)
             if self.nineq:
-                barrier_cost_grad = T.set_subtensor(barrier_cost_grad[self.nvar:], -self.mu_dev/(self.s_dev+self.eps))
+                barrier_cost_grad = T.set_subtensor(barrier_cost_grad[self.nvar:], -self.mu_dev / (self.s_dev+self.eps))
 
-        # construct expression for the Hessian of the Lagrangian (assumes Lagrange multipliers included in d2ce/d2ci expresssions), if applicable
+        # construct expression for the Hessian of the Lagrangian (assumes Lagrange multipliers included in
+        # d2ce/d2ci expressions), if applicable
         if not self.lbfgs:
             if precompile:
                 # construct expression for the Hessian of the Lagrangian
@@ -703,12 +729,27 @@ class IPM:
                 # construct expression for the symmetric Hessian matrix
                 if self.neq or self.nineq:
                     if self.nineq:
-                        hess_upper_left = lambda x, s, lda: np.concatenate([np.concatenate([np.triu(d2L(x, lda)), np.zeros((self.nvar, self.nineq))], axis=1), np.concatenate([np.zeros((self.nineq, self.nvar)), np.diag(lda[self.neq:]/(s + self.eps))], axis=1)], axis=0)
+                        hess_upper_left = lambda x, s, lda: np.concatenate([
+                            np.concatenate([
+                                np.triu(d2L(x, lda)),
+                                np.zeros((self.nvar, self.nineq))
+                            ], axis=1),
+                            np.concatenate([
+                                np.zeros((self.nineq, self.nvar)),
+                                np.diag(lda[self.neq:] / (s + self.eps))
+                            ], axis=1)
+                        ], axis=0)
                     else:
                         hess_upper_left = lambda x, s, lda: np.triu(d2L(x, lda))
                     hess_upper_right = lambda x: jaco(x)
-                    hess_upper = lambda x, s, lda: np.concatenate([hess_upper_left(x, s, lda), hess_upper_right(x)], axis=1)
-                    hess_triu = lambda x, s, lda: np.concatenate([hess_upper(x, s, lda), np.zeros((self.neq+self.nineq, self.nvar+2*self.nineq+self.neq))], axis=0)
+                    hess_upper = lambda x, s, lda: np.concatenate([
+                        hess_upper_left(x, s, lda),
+                        hess_upper_right(x)
+                    ], axis=1)
+                    hess_triu = lambda x, s, lda: np.concatenate([
+                        hess_upper(x, s, lda),
+                        np.zeros((self.neq + self.nineq, self.nvar + 2 * self.nineq + self.neq))
+                    ], axis=0)
                     hess = lambda x, s, lda: hess_triu(x, s, lda) + np.triu(hess_triu(x, s, lda), k=1).T
                 else:
                     hess_triu = lambda x, s, lda: np.triu(d2L(x, lda))
@@ -722,16 +763,23 @@ class IPM:
                     d2L -= d2ci
 
                 # construct expression for the symmetric Hessian matrix
-                hess = T.zeros((self.nvar+2*self.nineq+self.neq, self.nvar+2*self.nineq+self.neq))
-                hess = T.set_subtensor(hess[:self.nvar,:self.nvar], T.triu(d2L))
+                hess = T.zeros((self.nvar + 2 * self.nineq + self.neq, self.nvar + 2 * self.nineq + self.neq))
+                hess = T.set_subtensor(hess[:self.nvar, :self.nvar], T.triu(d2L))
                 if self.neq:
-                    hess = T.set_subtensor(hess[:self.nvar,(self.nvar+self.nineq):(self.nvar+self.nineq+self.neq)], dce)
+                    hess = T.set_subtensor(
+                        hess[:self.nvar, (self.nvar + self.nineq):(self.nvar + self.nineq + self.neq)],
+                        dce
+                    )
                 if self.nineq:
-                    hess = T.set_subtensor(hess[:self.nvar,(self.nvar+self.nineq+self.neq):], dci)
-                    hess = T.set_subtensor(hess[self.nvar:(self.nvar+self.nineq),self.nvar:(self.nvar+self.nineq)], Sigma) #T.triu(Sigma))
-                    hess = T.set_subtensor(hess[self.nvar:(self.nvar+self.nineq),(self.nvar+self.nineq+self.neq):], -T.eye(self.nineq))
+                    hess = T.set_subtensor(hess[:self.nvar, (self.nvar + self.nineq + self.neq):], dci)
+                    hess = T.set_subtensor(hess[self.nvar:(self.nvar + self.nineq), self.nvar:(self.nvar + self.nineq)],
+                                           Sigma) #T.triu(Sigma))
+                    hess = T.set_subtensor(
+                        hess[self.nvar:(self.nvar + self.nineq), (self.nvar + self.nineq + self.neq):],
+                        -T.eye(self.nineq)
+                    )
                 hess = T.triu(hess) + T.triu(hess).T
-                hess = hess - T.diag(T.diagonal(hess)/2.0)
+                hess = hess - T.diag(T.diagonal(hess) / 2.0)
 
         # construct expression for general linear system solve
         #gen_solve = T.slinalg.solve(self.M_dev, self.b_dev)
@@ -763,30 +811,39 @@ class IPM:
                     outputs=grad, on_unused_input='ignore')
 
         if self.lbfgs:
-            self.lbfgs_dir_func = theano.function(inputs=[self.x_dev, self.s_dev, self.lambda_dev, self.g_dev, self.zeta_dev, self.S_dev, self.Y_dev, self.SS_dev, self.L_dev, self.D_dev, self.B_dev], outputs=dz, on_unused_input='ignore')
+            self.lbfgs_dir_func = theano.function(inputs=[self.x_dev, self.s_dev, self.lambda_dev, self.g_dev,
+                                                          self.zeta_dev, self.S_dev, self.Y_dev, self.SS_dev,
+                                                          self.L_dev, self.D_dev, self.B_dev],
+                                                  outputs=dz, on_unused_input='ignore')
             if dz_sqr is not None:
-                self.lbfgs_dir_func_sqr = theano.function(inputs=[self.x_dev, self.s_dev, self.lambda_dev, self.g_dev, self.zeta_dev, self.s_dev, self.Y_dev, self.SS_dev, self.L_dev, self.D_dev, self.B_dev], outputs=dz_sqr, on_unused_input='ignore')
+                self.lbfgs_dir_func_sqr = theano.function(inputs=[self.x_dev, self.s_dev, self.lambda_dev, self.g_dev,
+                                                                  self.zeta_dev, self.s_dev, self.Y_dev, self.SS_dev,
+                                                                  self.L_dev, self.D_dev, self.B_dev],
+                                                          outputs=dz_sqr, on_unused_input='ignore')
         else:
             if precompile:
                 self.hess = hess
             else:
                 self.hess = theano.function(
                     inputs=[self.x_dev, self.s_dev, self.lambda_dev],
-                    outputs=hess, on_unused_input='ignore')
+                    outputs=hess, on_unused_input='ignore'
+                )
 
         if precompile:
             self.phi = phi
         else:
             self.phi = theano.function(
                 inputs=[self.x_dev, self.s_dev],
-                outputs=phi, on_unused_input='ignore')
+                outputs=phi, on_unused_input='ignore'
+            )
 
         if precompile:
             self.dphi = dphi
         else:
             self.dphi = theano.function(
                 inputs=[self.x_dev, self.s_dev, self.dz_dev],
-                outputs=dphi, on_unused_input='ignore')
+                outputs=dphi, on_unused_input='ignore'
+            )
 
         self.eigh = theano.function(
             inputs=[self.M_dev],
@@ -809,7 +866,8 @@ class IPM:
             else:
                 self.con = theano.function(
                     inputs=[self.x_dev, self.s_dev],
-                    outputs=con, on_unused_input='ignore')
+                    outputs=con, on_unused_input='ignore'
+                )
 
             if precompile:
                 self.jaco = jaco
@@ -839,48 +897,44 @@ class IPM:
 
         self.compiled = True
 
-        
     def KKT(self, x, s, lda):
-        """Calculate the first-order Karush-Kuhn-Tucker conditions. Irrelevant
+        '''Calculate the first-order Karush-Kuhn-Tucker conditions. Irrelevant
            conditions are set to zero.
-
-        """
-
+        '''
         # kkt1 is the gradient of the Lagrangian with respect to x (weights)
         # kkt2 is the gradient of the Lagrangian with respect to s (slack variables)
-        # kkt3 is the gradient of the Lagrangian with respect to lda[:self.neq] (equality constraints Lagrange multipliers)
-        # kkt4 is the gradient of the Lagrangian with respect to lda[self.neq:] (inequality constraints Lagrange multipliers)
+        # kkt3 is the gradient of the Lagrangian with respect to lda[:self.neq] (equality constraints Lagrange
+        #   multipliers)
+        # kkt4 is the gradient of the Lagrangian with respect to lda[self.neq:] (inequality constraints Lagrange
+        #   multipliers)
         kkts = self.grad(x, s, lda)
 
         if self.neq and self.nineq:
             kkt1 = kkts[:self.nvar]
-            kkt2 = kkts[self.nvar:(self.nvar+self.nineq)]*s
-            kkt3 = kkts[(self.nvar+self.nineq):(self.nvar+self.nineq+self.neq)]
-            kkt4 = kkts[(self.nvar+self.nineq+self.neq):]
+            kkt2 = kkts[self.nvar:(self.nvar + self.nineq)] * s
+            kkt3 = kkts[(self.nvar + self.nineq):(self.nvar + self.nineq + self.neq)]
+            kkt4 = kkts[(self.nvar + self.nineq + self.neq):]
         elif self.neq:
             kkt1 = kkts[:self.nvar]
             kkt2 = self.float_dtype(0.0)
-            kkt3 = kkts[(self.nvar+self.nineq):(self.nvar+self.nineq+self.neq)]
+            kkt3 = kkts[(self.nvar + self.nineq):(self.nvar + self.nineq + self.neq)]
             kkt4 = self.float_dtype(0.0)
         elif self.nineq:
             kkt1 = kkts[:self.nvar]
-            kkt2 = kkts[self.nvar:(self.nvar+self.nineq)]*s
+            kkt2 = kkts[self.nvar:(self.nvar + self.nineq)] * s
             kkt3 = self.float_dtype(0.0)
-            kkt4 = kkts[(self.nvar+self.nineq+self.neq):]
+            kkt4 = kkts[(self.nvar + self.nineq + self.neq):]
         else:
             kkt1 = kkts[:self.nvar]
             kkt2 = self.float_dtype(0.0)
             kkt3 = self.float_dtype(0.0)
             kkt4 = self.float_dtype(0.0)
 
-        return [kkt1, kkt2, kkt3, kkt4]
+        return kkt1, kkt2, kkt3, kkt4
 
-    
     def lbfgs_init(self):
-        """Initialize storage arrays for L-BFGS algorithm.
-
-        """
-        
+        '''Initialize storage arrays for L-BFGS algorithm.
+        '''
         # initialize diagonal constant and storage arrays
         zeta = self.float_dtype(self.lbfgs_zeta)
         S = np.array([], dtype=self.float_dtype).reshape((self.nvar, 0))
@@ -890,14 +944,11 @@ class IPM:
         D = np.array([], dtype=self.float_dtype).reshape((0, 0))
         lbfgs_fail = 0
 
-        return (zeta, S, Y, SS, L, D, lbfgs_fail)
+        return zeta, S, Y, SS, L, D, lbfgs_fail
 
-    
     def lbfgs_builder(self):
-        """Build the L-BFGS search direction calculation in Theano.
-
-        """
-
+        '''Build the L-BFGS search direction calculation in Theano.
+        '''
         # gradient vector
         self.g_dev = T.vector('self.g_dev')
 
@@ -943,80 +994,84 @@ class IPM:
             #
             #     H^(-1) = Z^(-1) - Z^(-1)*U*(U^T*Z^(-1)*U - M)^(-1)*U^T*Z^(-1).
 
-            # construct diagonal of "A"
-            Adiag = self.zeta_dev*T.ones((self.nvar,1))
+            # construct diagonal of 'A'
+            Adiag = self.zeta_dev * T.ones((self.nvar, 1))
             if self.nineq:
-                Sigma = (self.lambda_dev[self.neq:]/(self.s_dev + self.eps)).reshape((self.nineq,1))
+                Sigma = (self.lambda_dev[self.neq:] / (self.s_dev + self.eps)).reshape((self.nineq, 1))
                 Adiag = T.concatenate([Adiag, Sigma], axis=0)
 
-            if self.nvar+self.nineq == self.neq+self.nineq:
+            if self.nvar + self.nineq == self.neq + self.nineq:
                 # Jacobian is square and full-rank
 
                 # calculate -Z^(-1)*g using the inverse of a block matrix
-                v01 = sym_solve(self.B_dev, self.g_dev[:self.nvar+self.nineq].reshape((self.neq+self.nineq,1)))
-                v02 = sym_solve(self.B_dev.T, self.g_dev[self.nvar+self.nineq:].reshape((self.neq+self.nineq,1)))
-                v03 = -Adiag*sym_solve(self.B_dev, v02)
+                v01 = sym_solve(self.B_dev, self.g_dev[:self.nvar + self.nineq].reshape((self.neq + self.nineq, 1)))
+                v02 = sym_solve(self.B_dev.T, self.g_dev[self.nvar + self.nineq:].reshape((self.neq + self.nineq, 1)))
+                v03 = -Adiag * sym_solve(self.B_dev, v02)
                 Zg = T.concatenate([v02, v01 + v03], axis=0)
 
                 # construct U
-                W = T.concatenate([self.zeta_dev*self.S_dev, self.Y_dev], axis=1)
+                W = T.concatenate([self.zeta_dev * self.S_dev, self.Y_dev], axis=1)
                 if self.nineq:
-                    W = T.concatenate([W, T.zeros((self.nineq, 2*m_lbfgs))], axis=0)
+                    W = T.concatenate([W, T.zeros((self.nineq, 2 * m_lbfgs))], axis=0)
 
                 # calculate -Z^(-1)*U*(U^T*Z^(-1)*U - M)^(-1)*U^T*Z^(-1)*g (skipped if m_lbgs=0)
                 invB_W = sym_xolve(B, W)
-                M0 = T.concatenate([self.zeta_dev*self.SS_dev, self.L_dev], axis=1)
+                M0 = T.concatenate([self.zeta_dev * self.SS_dev, self.L_dev], axis=1)
                 M1 = T.concatenate([self.L_dev.T, -self.D_dev], axis=1)
                 Minv = T.concatenate([M0, M1], axis=0)
-                v10 = T.dot(W.T, Zg[:self.nvar+self.nineq])
+                v10 = T.dot(W.T, Zg[:self.nvar + self.nineq])
                 v11 = -sym_solve(Minv, v10)
-                X10 = T.concatenate([T.zeros((self.nvar+self.nineq, 2*m_lbfgs)), invB_W], axis=0)
+                X10 = T.concatenate([T.zeros((self.nvar + self.nineq, 2 * m_lbfgs)), invB_W], axis=0)
                 XZg = T.dot(X10, v11)
 
                 # combine -Z^(-1)*g and -Z^(-1)*U*(U^T*Z^(-1)*U - M)^(-1)*U^T*Z^(-1)*g
-                dz_sqr = ifelse(T.gt(m_lbfgs,0), Zg-XZg, Zg)
+                dz_sqr = ifelse(T.gt(m_lbfgs, 0), Zg - XZg, Zg)
             
             # Jacobian is not square or is rank-deficient
 
             # calculate some basic matrices from Z^(-1)
             BT_invA = self.B_dev.T
-            BT_invA = T.dot(BT_invA, diag(1.0/Adiag.reshape((Adiag.size,))))
+            BT_invA = T.dot(BT_invA, diag(1.0 / Adiag.reshape((Adiag.size,))))
             BT_invA_B = T.dot(BT_invA, self.B_dev)
 
             if self.neq:
                 # regularize if the equality constraints Jacobian is ill-conditioned
-                w = eigh(BT_invA_B[:self.neq,:self.neq])[0]
-                rcond = T.min(T.abs_(w))/T.max(T.abs_(w))
-                BT_invA_B = ifelse(T.le(rcond, self.eps), T.inc_subtensor(BT_invA_B[:self.neq,:self.neq], self.reg_coef*self.eta*(self.mu_dev ** self.beta)*T.eye(self.neq)), BT_invA_B)
+                w = eigh(BT_invA_B[:self.neq, :self.neq])[0]
+                rcond = T.min(T.abs_(w)) / T.max(T.abs_(w))
+                BT_invA_B = ifelse(
+                    T.le(rcond, self.eps),
+                    T.inc_subtensor(BT_invA_B[:self.neq, :self.neq],
+                                    self.reg_coef * self.eta * (self.mu_dev ** self.beta) * T.eye(self.neq)), BT_invA_B)
 
             # calculate -Z^(-1)*g using the inverse of a block matrix 
-            v00 = T.dot(BT_invA, self.g_dev[:self.nvar+self.nineq].reshape((self.nvar+self.nineq,1)))
+            v00 = T.dot(BT_invA, self.g_dev[:self.nvar + self.nineq].reshape((self.nvar + self.nineq, 1)))
             v01 = sym_solve(BT_invA_B, v00)
-            v02 = self.g_dev[:self.nvar+self.nineq].reshape((self.nvar+self.nineq,1))/Adiag - T.dot(BT_invA.T, v01)
-            v03 = -sym_solve(BT_invA_B, self.g_dev[self.nvar+self.nineq:].reshape((self.neq+self.nineq,1)))
+            v02 = (self.g_dev[:self.nvar + self.nineq].reshape((self.nvar + self.nineq, 1)) / Adiag -
+                   T.dot(BT_invA.T, v01))
+            v03 = -sym_solve(BT_invA_B, self.g_dev[self.nvar + self.nineq:].reshape((self.neq + self.nineq, 1)))
             v04 = -T.dot(BT_invA.T, v03)
             Zg = T.concatenate([v02 + v04, v01 + v03], axis=0)
 
             # construct U
-            W = T.concatenate([self.zeta_dev*self.S_dev, self.Y_dev], axis=1)
+            W = T.concatenate([self.zeta_dev * self.S_dev, self.Y_dev], axis=1)
             if self.nineq:
-                W = T.concatenate([W, T.zeros((self.nineq, 2*m_lbfgs))], axis=0)
+                W = T.concatenate([W, T.zeros((self.nineq, 2 * m_lbfgs))], axis=0)
 
             # calculate -Z^(-1)*U*(U^T*Z^(-1)*U - M)^(-1)*U^T*Z^(-1)*g (skipped if m_lbgs=0)
-            BT_gmaW = T.dot(self.B_dev.T, W)/self.zeta_dev
+            BT_gmaW = T.dot(self.B_dev.T, W) / self.zeta_dev
             X00 = -sym_solve(BT_invA_B, BT_gmaW)
-            X01 = W/self.zeta_dev + T.dot(BT_invA.T, X00)
+            X01 = W / self.zeta_dev + T.dot(BT_invA.T, X00)
             X02 = T.dot(W.T, X01)
-            M0 = T.concatenate([self.zeta_dev*self.SS_dev, self.L_dev], axis=1)
+            M0 = T.concatenate([self.zeta_dev * self.SS_dev, self.L_dev], axis=1)
             M1 = T.concatenate([self.L_dev.T, -self.D_dev], axis=1)
             Minv = T.concatenate([M0, M1], axis=0)
-            v10 = T.dot(W.T, Zg[:self.nvar+self.nineq])
+            v10 = T.dot(W.T, Zg[:self.nvar + self.nineq])
             v11 = sym_solve(X02 - Minv, v10)
             X10 = T.concatenate([X01, -X00], axis=0)
             XZg = T.dot(X10, v11)
 
             # combine -Z^(-1)*g and -Z^(-1)*U*(U^T*Z^(-1)*U - M)^(-1)*U^T*Z^(-1)*g
-            dz = ifelse(T.gt(m_lbfgs, 0), Zg-XZg, Zg)
+            dz = ifelse(T.gt(m_lbfgs, 0), Zg - XZg, Zg)
         else:
             # For unconstrained problems, calculate the search direction
             #
@@ -1032,13 +1087,14 @@ class IPM:
             # The substitutions gma=zeta, R=L, and Y^T*Y=S^T*S are made to save variables.
 
             # calculate -gma*I*g
-            Hg = self.zeta_dev*self.g_dev.reshape((self.nvar,1))
+            Hg = self.zeta_dev * self.g_dev.reshape((self.nvar, 1))
 
             # calculate -W*Q*W.T*g (skipped if m_lbfgs=0)
-            W = T.concatenate([self.S_dev, self.zeta_dev*self.Y_dev], axis=1)
+            W = T.concatenate([self.S_dev, self.zeta_dev * self.Y_dev], axis=1)
             WT_g = T.dot(W.T, self.g_dev)
-            B = -sym_solve(self.L_dev, WT_g[:m_lbfgs].reshape((m_lbfgs,1)))
-            A = -sym_solve(self.L_dev.T, T.dot(self.D_dev + self.zeta_dev*self.SS_dev, B)) - sym_solve(self.L_dev.T, WT_g[m_lbfgs:].reshape((m_lbfgs,1)))
+            B = -sym_solve(self.L_dev, WT_g[:m_lbfgs].reshape((m_lbfgs, 1)))
+            A = (-sym_solve(self.L_dev.T, T.dot(self.D_dev + self.zeta_dev * self.SS_dev, B)) -
+                 sym_solve(self.L_dev.T, WT_g[m_lbfgs:].reshape((m_lbfgs, 1))))
             Hg_update = T.dot(W, T.concatenate([A, B], axis=0))
 
             # combine -gma*I*g and -W*Q*W.T*g
@@ -1046,23 +1102,20 @@ class IPM:
 
         if self.nvar+self.nineq == self.neq+self.nineq:
             # if constraints Jacobian is square, return both rank-deficient and full-rank search direction expressions
-            return (dz, dz_sqr)
+            return dz, dz_sqr
         else:
             # if constraints Jacobian is rectangular or the problem is unconstrained, return only one expression
-            return (dz, None)
+            return dz, None
 
-        
     def lbfgs_dir(self, x, s, lda, g, zeta, S, Y, SS, L, D):
-        """Calculate the search direction for the L-BFGS algorithm.
-
-        """
-
+        '''Calculate the search direction for the L-BFGS algorithm.
+        '''
         # calculate the step direction
         if self.neq or self.nineq:
             reduce = False
             B = self.jaco(x)
             if B.shape[0] == B.shape[1]:
-                if np.linalg.cond(B) < 1.0/self.eps:
+                if np.linalg.cond(B) < 1.0 / self.eps:
                     # B is invertible, reduce problem
                     reduce = True
             if reduce:
@@ -1078,7 +1131,8 @@ class IPM:
                 #H[:self.nvar,:self.nvar] = zeta*np.eye(self.nvar)
                 #if self.nineq:
                 #    Sigma = (lda[self.neq:]/(s+self.eps)).reshape((self.nineq,))
-                #    H[self.nvar:self.nvar+self.nineq, self.nvar:self.nvar+self.nineq] = np.diag(lda[self.neq:]/(s+self.eps))
+                #    H[self.nvar:self.nvar+self.nineq, self.nvar:self.nvar+self.nineq] = \
+                #        np.diag(lda[self.neq:]/(s+self.eps))
                 #H[self.nvar+self.nineq:, :self.nvar+self.nineq] = B.T
                 #H[:self.nvar+self.nineq, self.nvar+self.nineq:] = B
                 #
@@ -1089,7 +1143,9 @@ class IPM:
                 #    M1 = np.concatenate([L.T, -D], axis=1)
                 #    Minv = np.concatenate([M0, M1], axis=0)
                 #    W = np.concatenate([zeta*S, Y], axis=1)
-                #    H[:self.nvar, :self.nvar] = H[:self.nvar, :self.nvar] - np.dot(W, self.sym_solve(Minv, W.T.reshape((W.size/self.nvar, self.nvar))))
+                #    H[:self.nvar, :self.nvar] = (H[:self.nvar, :self.nvar] -
+                #                                 np.dot(W, self.sym_solve(Minv,
+                #                                                          W.T.reshape((W.size/self.nvar, self.nvar)))))
                 # 
                 #dz = self.sym_solve(H, g.reshape((g.size,1)))
         else:
@@ -1114,21 +1170,21 @@ class IPM:
             
         return dz.reshape((dz.size,))
 
-    
     def lbfgs_curv_perturb(self, dx, dg):
-        """Perturb the curvature of the L-BFGS update when
+        '''Perturb the curvature of the L-BFGS update when
            np.dot(dg, dx) <= 0.0 to maintain positive definiteness
            of the Hessian approximation.
-
-        """
+        '''
 
         if np.dot(dg, dx) <= 0.0:
-            # L-BFGS update is not positive definite, cut most negative value of the gradient displacement until it is close to zero or the update becomes positive semidefinite
+            # L-BFGS update is not positive definite, cut most negative value of the gradient displacement until it is
+            # close to zero or the update becomes positive semidefinite
             idx = np.argmin(dg * dx)
-            while np.dot(dg, dx) < -np.sqrt(self.eps) and dg[idx]*dx[idx] < -np.sqrt(self.eps):
+            while np.dot(dg, dx) < -np.sqrt(self.eps) and dg[idx] * dx[idx] < -np.sqrt(self.eps):
                 dg[idx] *= 0.5
         if np.dot(dg, dx) < np.sqrt(self.eps) and (self.neq or self.nineq):
-            # if the above procedure did not work, perturb the negative gradient displacements until the L-BFGS update is positive definite
+            # if the above procedure did not work, perturb the negative gradient displacements until the L-BFGS update
+            # is positive definite
             dc_new = self.jaco(x_new)
             dc_old = self.jaco(x_old)
             dcc = np.dot(dc_old, g_old[self.nvar+self.nineq:]) - np.dot(dc_new, g_new[self.nvar+self.nineq:])
@@ -1138,7 +1194,7 @@ class IPM:
             while inp < np.sqrt(self.eps) and np.linalg.norm(dg_new) > np.sqrt(self.eps) and not np.isinf(inp):
                 dg_new = np.copy(dg)
                 mask = np.where(dg_new*dx < np.sqrt(self.eps))
-                dg_new[mask] = dg[mask] + self.delta*np.sign(dx[mask])*np.abs(dcc[mask])
+                dg_new[mask] = dg[mask] + self.delta * np.sign(dx[mask]) * np.abs(dcc[mask])
                 self.delta *= 2.0
                 inp = np.dot(dg_new, dx)
             dg = np.copy(dg_new)
@@ -1146,74 +1202,71 @@ class IPM:
         # return the perturbed gradient displacement
         return dg
 
-    
     def lbfgs_update(self, x_old, x_new, g_old, g_new, zeta, S, Y, SS, L, D, lbfgs_fail):
-        """Update stored arrays for the next L-BFGS iteration
-
-        """
-
+        '''Update stored arrays for the next L-BFGS iteration
+        '''
         # calculate displacements with respect to the weights and gradient
-        dx = x_new-x_old
-        dg = g_old[:self.nvar]-g_new[:self.nvar]
+        dx = x_new - x_old
+        dg = g_old[:self.nvar] - g_new[:self.nvar]
 
         # curvature perturbation (not used)
         # dg = self.lbfgs_curv_perturb(dx, dg)
         
         # calculate updated zeta
         if self.neq or self.nineq:
-            zeta_new = np.dot(dg, dx)/(np.dot(dx, dx)+self.eps)
+            zeta_new = np.dot(dg, dx) / (np.dot(dx, dx) + self.eps)
         else:
-            zeta_new = np.dot(dg, dx)/(np.dot(dg, dg)+self.eps)
+            zeta_new = np.dot(dg, dx) / (np.dot(dg, dg) + self.eps)
         if np.dot(dx, dg) > np.sqrt(self.eps) and zeta_new > np.sqrt(self.eps):
             # if initial Hessian approximation is positive definite, update storage arrays (see [2] for definitions)
             zeta = zeta_new
             if S.shape[1] > self.lbfgs:
                 # if S and Y exceed memory limit, remove oldest displacements
-                S[:,:-1] = S[:,1:]
-                Y[:,:-1] = Y[:,1:]
-                SS[:-1,:-1] = SS[1:,1:]
-                L[:-1,:-1] = L[1:,1:]
-                D[:-1,:-1] = D[1:,1:]
+                S[:, :-1] = S[:, 1:]
+                Y[:, :-1] = Y[:, 1:]
+                SS[:-1, :-1] = SS[1:, 1:]
+                L[:-1, :-1] = L[1:, 1:]
+                D[:-1, :-1] = D[1:, 1:]
             else:
                 # otherwise, expand arrays
-                lsize = S.shape[1]+1       
+                lsize = S.shape[1] + 1
                 S = np.concatenate([S, np.zeros((self.nvar, 1), dtype=self.float_dtype)], axis=1)
                 Y = np.concatenate([Y, np.zeros((self.nvar, 1), dtype=self.float_dtype)], axis=1)
-                SS = np.concatenate([SS, np.zeros((1, lsize-1), dtype=self.float_dtype)], axis=0)
+                SS = np.concatenate([SS, np.zeros((1, lsize - 1), dtype=self.float_dtype)], axis=0)
                 SS = np.concatenate([SS, np.zeros((lsize, 1), dtype=self.float_dtype)], axis=1)
-                L = np.concatenate([L, np.zeros((1, lsize-1), dtype=self.float_dtype)], axis=0)
+                L = np.concatenate([L, np.zeros((1, lsize - 1), dtype=self.float_dtype)], axis=0)
                 L = np.concatenate([L, np.zeros((lsize, 1), dtype=self.float_dtype)], axis=1)
-                D = np.concatenate([D, np.zeros((1, lsize-1), dtype=self.float_dtype)], axis=0)
+                D = np.concatenate([D, np.zeros((1, lsize - 1), dtype=self.float_dtype)], axis=0)
                 D = np.concatenate([D, np.zeros((lsize, 1), dtype=self.float_dtype)], axis=1)
 
-            S[:,-1] = dx
-            Y[:,-1] = dg
+            S[:, -1] = dx
+            Y[:, -1] = dg
 
             if self.neq or self.nineq:
-                SS_update = np.dot(S.T, dx.reshape((self.nvar,1)))
+                SS_update = np.dot(S.T, dx.reshape((self.nvar, 1)))
             else:
                 # this is YY_update
-                SS_update = np.dot(Y.T, dg.reshape((self.nvar,1)))
+                SS_update = np.dot(Y.T, dg.reshape((self.nvar, 1)))
 
             # update storage arrays (this is YY for unconstrained)
-            SS[:,-1] = SS_update.reshape((SS_update.size,))
-            SS[-1,:] = SS_update.reshape((SS_update.size,))
+            SS[:, -1] = SS_update.reshape((SS_update.size,))
+            SS[-1, :] = SS_update.reshape((SS_update.size,))
             lsize = SS.shape[1]
-            SS = SS.reshape((lsize,lsize))
+            SS = SS.reshape((lsize, lsize))
 
             if self.neq or self.nineq:
                 L_update = np.dot(dx.reshape((1, self.nvar)), Y)
-                L[-1,:] = L_update
-                L[-1,-1] = self.float_dtype(0.0)
+                L[-1, :] = L_update
+                L[-1, -1] = self.float_dtype(0.0)
             else:
                 # this is R_update and R
                 L_update = np.dot(S.T, dg.reshape((self.nvar, 1))).reshape((S.shape[1],))
-                L[:,-1] = L_update
-            L = L.reshape((lsize,lsize))            
+                L[:, -1] = L_update
+            L = L.reshape((lsize, lsize))
 
             D_update = np.dot(dx, dg)
             D[-1,-1] = D_update
-            D = D.reshape((lsize,lsize))
+            D = D.reshape((lsize, lsize))
 
             # reset L-BFGS failure counter
             lbfgs_fail = 0
@@ -1222,99 +1275,92 @@ class IPM:
             lbfgs_fail += 1
 
         if lbfgs_fail > self.lbfgs_fail_max and S.shape[1] > 0:
-            # if the L-BFGS fairlure counter exceeds the maximum number of failures, reset initial Hessian approximation and storage arrays
+            # if the L-BFGS fairlure counter exceeds the maximum number of failures, reset initial Hessian approximation
+            # and storage arrays
             if self.verbosity > 2:
-                print "Max failures reached, resetting storage arrays."
+                print('Max failures reached, resetting storage arrays.')
             zeta, S, Y, SS, L, D, lbfgs_fail = self.lbfgs_init()
 
         # return initial Hessian approximation, storage arrays, and L-BFGS failure counter
-        return (zeta, S, Y, SS, L, D, lbfgs_fail)
+        return zeta, S, Y, SS, L, D, lbfgs_fail
 
-    
     def reghess(self, Hc):
-        """Regularize the Hessian to avoid ill-conditioning and to escape saddle
+        '''Regularize the Hessian to avoid ill-conditioning and to escape saddle
            points.
-
-        """
-        
+        '''
         # compute eigenvalues and condition number
         w = self.eigh(Hc)
-        rcond = np.min(np.abs(w))/np.max(np.abs(w))
+        rcond = np.min(np.abs(w)) / np.max(np.abs(w))
 
         if rcond <= self.eps or (self.neq + self.nineq) != np.sum(w < -self.eps):
             # if the Hessian is ill-conditioned or the matrix inertia is undesireable, regularize the Hessian
             if rcond <= self.eps and self.neq:
-                # if the Hessian is ill-conditioned, regularize by replacing some zeros with a small magnitude diagonal matrix
-                ind1 = self.nvar+self.nineq
-                ind2 = ind1+self.neq
-                Hc[ind1:ind2, ind1:ind2] -= self.reg_coef*self.eta*(self.mu_host ** self.beta)*np.eye(self.neq)
+                # if the Hessian is ill-conditioned, regularize by replacing some zeros with a small magnitude diagonal
+                # matrix
+                ind1 = self.nvar + self.nineq
+                ind2 = ind1 + self.neq
+                Hc[ind1:ind2, ind1:ind2] -= self.reg_coef * self.eta * (self.mu_host ** self.beta) * np.eye(self.neq)
             if self.delta == 0.0:
                 # if the diagonal shift coefficient is zero, set to initial value
                 self.delta = self.delta0
             else:
                 # prevent the diagonal shift coefficient from becoming too small
-                self.delta = np.max([self.delta/2, self.delta0])
+                self.delta = np.max([self.delta / 2, self.delta0])
             # regularize Hessian with diagonal shift matrix (delta*I) until matrix inertia condition is satisfied
-            Hc[:self.nvar, :self.nvar] += self.delta*np.eye(self.nvar)
+            Hc[:self.nvar, :self.nvar] += self.delta * np.eye(self.nvar)
             w = self.eigh(Hc)
             while (self.neq + self.nineq) != np.sum(w < -self.eps):
-                Hc[:self.nvar, :self.nvar] -= self.delta*np.eye(self.nvar)
+                Hc[:self.nvar, :self.nvar] -= self.delta * np.eye(self.nvar)
                 self.delta *= 10.0
-                Hc[:self.nvar, :self.nvar] += self.delta*np.eye(self.nvar)
+                Hc[:self.nvar, :self.nvar] += self.delta * np.eye(self.nvar)
                 w = self.eigh(Hc)
 
         # return regularized Hessian
         return Hc
 
-    
     def step(self, x, dx):
-        """Golden section search used to determine the maximum
+        '''Golden section search used to determine the maximum
            step length for slack variables and Lagrange multipliers
            using the fraction-to-the-boundary rule.
-
-        """
-
-        GOLD = (np.sqrt(5)+1.0)/2.0
+        '''
+        GOLD = (np.sqrt(5.0) + 1.0) / 2.0
 
         a = 0.0
         b = 1.0
-        if np.all(x + b*dx >= (1.0-self.tau)*x):
+        if np.all(x + b * dx >= (1.0 - self.tau) * x):
             return b
         else:
-            c = b - (b - a)/GOLD
-            d = a + (b - a)/GOLD
-            while np.abs(b - a) > GOLD*self.Xtol:
-                if np.any(x + d*dx < (1.0-self.tau)*x):
+            c = b - (b - a) / GOLD
+            d = a + (b - a) / GOLD
+            while np.abs(b - a) > GOLD * self.Xtol:
+                if np.any(x + d * dx < (1.0 - self.tau) * x):
                     b = np.copy(d)
                 else:
                     a = np.copy(d)
                 if c > a:
-                    if np.any(x + c*dx < (1.0-self.tau)*x):
+                    if np.any(x + c * dx < (1.0 - self.tau) * x):
                         b = np.copy(c)
                     else:
                         a = np.copy(c)
         
-                c = b - (b - a)/GOLD
-                d = a + (b - a)/GOLD
+                c = b - (b - a) / GOLD
+                d = a + (b - a) / GOLD
             
             return a
 
-        
     def search(self, x0, s0, lda0, dz, alpha_smax, alpha_lmax):
-        """Backtracking line search to find a solution that leads
+        '''Backtracking line search to find a solution that leads
            to a smaller value of the Lagrangian within the confines
            of the maximum step length for the slack variables and
            Lagrange multipliers found using class function 'step'.
-
-        """
-
+        '''
         # extract search directions along x, s, and lda (weights, slacks, and multipliers)
         dx = dz[:self.nvar]
         if self.nineq:
-            ds = dz[self.nvar:(self.nvar+self.nineq)]
+            ds = dz[self.nvar:(self.nvar + self.nineq)]
 
         if self.neq or self.nineq:
-            dl = dz[(self.nvar+self.nineq):]
+            dl = dz[(self.nvar + self.nineq):]
         else:
             dl = self.float_dtype(0.0)
             alpha_lmax = self.float_dtype(0.0)
@@ -1322,108 +1368,115 @@ class IPM:
         x = np.copy(x0)
         s = np.copy(s0)
         phi0 = self.phi(x0, s0)
-        dphi0 = self.dphi(x0, s0, dz[:self.nvar+self.nineq])
+        dphi0 = self.dphi(x0, s0, dz[:self.nvar + self.nineq])
         correction = False
         if self.nineq:
             # step search when there are inequality constraints
-            if self.phi(x0 + alpha_smax*dx, s0 + alpha_smax*ds) > phi0 + alpha_smax*self.eta*dphi0:
+            if self.phi(x0 + alpha_smax * dx, s0 + alpha_smax * ds) > phi0 + alpha_smax * self.eta * dphi0:
                 # second-order correction
                 c_old = self.con(x0, s0)
-                c_new = self.con(x0+alpha_smax*dx, s0+alpha_smax*ds)
+                c_new = self.con(x0 + alpha_smax * dx, s0 + alpha_smax * ds)
                 if np.sum(np.abs(c_new)) > np.sum(np.abs(c_old)):
                     # infeasibility has increased, attempt to correct
                     A = self.jaco(x0).T
                     try:
                         # calculate a feasibility restoration direction
-                        dz_p = -self.sym_solve(A, c_new.reshape((self.nvar+self.nineq,1))).reshape((self.nvar+self.nineq,))
+                        dz_p = -self.sym_solve(
+                            A,
+                            c_new.reshape((self.nvar + self.nineq, 1))
+                        ).reshape((self.nvar + self.nineq,))
                     except:
                         # if the Jacobian is not invertible, find the minimum norm solution instead
                         dz_p = -np.linalg.lstsq(A, c_new)[0]
-                    if self.phi(x0 + alpha_smax*dx + dz_p[:self.nvar], s0 + alpha_smax*ds + dz_p[self.nvar:]) <= phi0 + alpha_smax*self.eta*dphi0:
-                        alpha_corr = self.step(s0, alpha_smax*ds + dz_p[self.nvar:])
-                        if self.phi(x0 + alpha_corr*(alpha_smax*dx + dz_p[:self.nvar]), s0 + alpha_corr*(alpha_smax*ds + dz_p[self.nvar:])) <= phi0 + alpha_smax*self.eta*dphi0:
+                    if (self.phi(x0 + alpha_smax * dx + dz_p[:self.nvar], s0 + alpha_smax * ds + dz_p[self.nvar:]) <=
+                            phi0 + alpha_smax * self.eta * dphi0):
+                        alpha_corr = self.step(s0, alpha_smax * ds + dz_p[self.nvar:])
+                        if (self.phi(x0 + alpha_corr * (alpha_smax * dx + dz_p[:self.nvar]),
+                                     s0 + alpha_corr * (alpha_smax * ds + dz_p[self.nvar:])) <=
+                                phi0 + alpha_smax*self.eta*dphi0):
                             if self.verbosity > 2:
-                                print "Second-order feasibility correction accepted"
+                                print('Second-order feasibility correction accepted')
                             # correction accepted
                             correction = True
                 if not correction:
                     # infeasibility has not increased, no correction necessary
                     alpha_smax *= self.tau
                     alpha_lmax *= self.tau
-                    while self.phi(x0 + alpha_smax*dx, s0 + alpha_smax*ds) > phi0 + alpha_smax*self.eta*dphi0:
+                    while self.phi(x0 + alpha_smax * dx, s0 + alpha_smax * ds) > phi0 + alpha_smax * self.eta * dphi0:
                         # backtracking line search
-                        if np.sqrt(np.linalg.norm(alpha_smax*dx) ** 2 + np.linalg.norm(alpha_lmax*ds) ** 2) < self.eps:
+                        if (np.sqrt(np.linalg.norm(alpha_smax * dx) ** 2 + np.linalg.norm(alpha_lmax * ds) ** 2) <
+                                self.eps):
                             # search direction is unreliable to machine precision, stop solver
                             if self.verbosity > 2:
-                                print "Search direction is unreliable to machine precision."
+                                print('Search direction is unreliable to machine precision.')
                             self.signal = -2
-                            return (x0, s0, lda0)
+                            return x0, s0, lda0
                         alpha_smax *= self.tau
                         alpha_lmax *= self.tau
             # update slack variables
             if correction:
-                s = s0 + alpha_corr*(alpha_smax*ds + dz_p[self.nvar:])
+                s = s0 + alpha_corr * (alpha_smax * ds + dz_p[self.nvar:])
             else:
-                s = s0 + alpha_smax*ds
+                s = s0 + alpha_smax * ds
         else:
             # step search for only equality constraints or unconstrained problems
-            if self.phi(x0 + alpha_smax*dx, s0) > phi0 + alpha_smax*self.eta*dphi0:
+            if self.phi(x0 + alpha_smax * dx, s0) > phi0 + alpha_smax * self.eta * dphi0:
                 if self.neq:
-                # second-order correction
+                    # second-order correction
                     c_old = self.con(x0, s0)
-                    c_new = self.con(x0+alpha_smax*dx, s0)
+                    c_new = self.con(x0 + alpha_smax * dx, s0)
                     if np.sum(np.abs(c_new)) > np.sum(np.abs(c_old)):
                         # infeasibility has increased, attempt to correct
                         A = self.jaco(x0).T
                         try:
                             # calculate a feasibility restoration direction
-                            dz_p = -self.sym_solve(A, c_new.reshape((self.nvar,self.nineq,1))).reshape((self.nvar+self.nineq,))
+                            dz_p = -self.sym_solve(
+                                A,
+                                c_new.reshape((self.nvar, self.nineq, 1))
+                            ).reshape((self.nvar + self.nineq,))
                         except:
                             # if the Jacobian is not invertible, find the minimum norm solution instead
                             dz_p = -np.linalg.lstsq(A, c_new)[0]
-                        if self.phi(x0 + alpha_smax*dx + dz_p, s0) <= phi0 + alpha_smax*self.eta*dphi0:
+                        if self.phi(x0 + alpha_smax * dx + dz_p, s0) <= phi0 + alpha_smax * self.eta * dphi0:
                             # correction accepted
                             if self.verbosity > 2:
-                                print "Second-order feasibility correction accepted"
+                                print('Second-order feasibility correction accepted')
                             alpha_corr = self.float_dtype(1.0)
                             correction = True
                 if not correction:
                     # infeasibility has not increased, no correction necessary
                     alpha_smax *= self.tau
                     alpha_lmax *= self.tau
-                    while self.phi(x0 + alpha_smax*dx, s0) > phi0 + alpha_smax*self.eta*dphi0:
+                    while self.phi(x0 + alpha_smax * dx, s0) > phi0 + alpha_smax * self.eta * dphi0:
                         # backtracking line search
-                        if np.linalg.norm(alpha_smax*dx) < self.eps:
+                        if np.linalg.norm(alpha_smax * dx) < self.eps:
                             # search direction is unreliable to machine precision, stop solver
                             if self.verbosity > 2:
-                                print "Search direction is unreliable to machine precision."
+                                print('Search direction is unreliable to machine precision.')
                             self.signal = -2
-                            return (x0, s0, lda0)
+                            return x0, s0, lda0
                         alpha_smax *= self.tau
                         alpha_lmax *= self.tau
         # update weights
         if correction:
-            x = x0 + alpha_corr*(alpha_smax*dx + dz_p[:self.nvar])
+            x = x0 + alpha_corr * (alpha_smax * dx + dz_p[:self.nvar])
         else:
-            x = x0 + alpha_smax*dx
+            x = x0 + alpha_smax * dx
 
         # update multipliers (if applicable)
         if self.neq or self.nineq:
-            lda = lda0 + alpha_lmax*dl
+            lda = lda0 + alpha_lmax * dl
         else:
             lda = np.copy(lda0)
 
         # return updated weights, slacks, and multipliers
-        return (x, s, lda)
-
+        return x, s, lda
 
     def solve(self, x0=None, s0=None, lda0=None, force_recompile=False):
-        """Main solver function that initiates, controls the iteraions, and
+        '''Main solver function that initiates, controls the iteraions, and
          performs the primary operations of the line search primal-dual
-         interior-point method.         
-
-        """
-
+         interior-point method.
+        '''
         # check if weights, slacks, or multipliers are given as input
         if x0 is not None:
             self.x0 = x0
@@ -1491,9 +1544,9 @@ class IPM:
 
         if self.verbosity > 0:
             if self.lbfgs:
-                print "Searching for a feasible local minimizer using L-BFGS to approximate the Hessian."
+                print('Searching for a feasible local minimizer using L-BFGS to approximate the Hessian.')
             else:
-                print "Searching for a feasible local minimizer using the exact Hessian."
+                print('Searching for a feasible local minimizer using the exact Hessian.')
 
         iter_count = 0
         if self.Ftol is not None:
@@ -1509,70 +1562,82 @@ class IPM:
         for outer in range(self.niter):
             # begin outer iterations where the barrier parameter is adjusted
 
-            # determine if the current point has converged to Ktol precision using KKT conditions; if True, solution found
-            if np.linalg.norm(kkt[0]) <= self.Ktol and np.linalg.norm(kkt[1]) <= self.Ktol and np.linalg.norm(kkt[2]) <= self.Ktol and np.linalg.norm(kkt[3]) <= self.Ktol:
+            # determine if the current point has converged to Ktol precision using KKT conditions; if True, solution
+            # found
+            if all([np.linalg.norm(kkt[0]) <= self.Ktol, np.linalg.norm(kkt[1]) <= self.Ktol,
+                    np.linalg.norm(kkt[2]) <= self.Ktol, np.linalg.norm(kkt[3]) <= self.Ktol]):
                 self.signal = 1
                 Ktol_converged = True 
                 break
 
             if self.verbosity > 0 and self.nineq:
-                print "OUTER ITERATION " + str(outer+1)
+                print('OUTER ITERATION {}'.format(outer+1))
 
             for inner in range(self.miter):
                 # begin inner iterations where the barrier parameter is held fixed
 
                 # check convergence to muTol precision using the KKT conditions; if True, break from the inner loop
                 muTol = np.max([self.Ktol, self.mu_host])
-                if np.linalg.norm(kkt[0]) <= muTol and np.linalg.norm(kkt[1]) <= muTol and np.linalg.norm(kkt[2]) <= muTol and np.linalg.norm(kkt[3]) <= muTol:
+                if all([np.linalg.norm(kkt[0]) <= muTol, np.linalg.norm(kkt[1]) <= muTol,
+                        np.linalg.norm(kkt[2]) <= muTol, np.linalg.norm(kkt[3]) <= muTol]):
                     if not self.neq and not self.nineq:
                         self.signal = 1
                         Ktol_converged = True
                     break
 
                 if self.verbosity > 0:
+                    msg = []
                     if self.nineq:
-                        msg = "* INNER ITERATION " + str(inner+1)
+                        msg.append('* INNER ITERATION {}'.format(inner + 1))
                     else:
-                        msg = "ITERATION " + str(iter_count+1)
+                        msg.append('ITERATION {}'.format(iter_count + 1))
                     if self.verbosity > 1:
-                        msg += ", f(x) = " + str(self.cost(x))
+                        msg.append('f(x) = {}'.format(self.cost(x)))
                     if self.verbosity > 2:
-                        msg += ", |dL/dx| = " + str(np.linalg.norm(kkt[0])) + ", |dL/ds| = " + str(np.linalg.norm(kkt[1]))
-                        msg += ", |ce| = " + str(np.linalg.norm(kkt[2])) + ", |ci-s| = " + str(np.linalg.norm(kkt[3]))
-                    print msg
+                        msg.append('|dL/dx| = {}'.format(np.linalg.norm(kkt[0])))
+                        msg.append('|dL/ds| = {}'.format(np.linalg.norm(kkt[1])))
+                        msg.append('|ce| = {}'.format(np.linalg.norm(kkt[2])))
+                        msg.append('|ci-s| = {}'.format(np.linalg.norm(kkt[3])))
+                    print(', '.join(msg))
 
                 if self.lbfgs:
-                    # if using the L-BFGS algorithm, calculate the new and prior gradients and weights and update storage arrays
+                    # if using the L-BFGS algorithm, calculate the new and prior gradients and weights and update
+                    # storage arrays
                     if inner > 0 or outer > 0:
                         g_old = -self.grad(x_old, s, lda)
                         g_new = -self.grad(x, s, lda)
-                        zeta, S, Y, SS, L, D, lbfgs_fail = self.lbfgs_update(x_old, x, g_old, g_new, zeta, S, Y, SS, L, D, lbfgs_fail)
+                        zeta, S, Y, SS, L, D, lbfgs_fail = self.lbfgs_update(x_old, x, g_old, g_new, zeta, S, Y, SS, L,
+                                                                             D, lbfgs_fail)
                         x_old = np.copy(x)
                         g = np.copy(g_new)
                     # calculate the search direction
                     dz = self.lbfgs_dir(x, s, lda, g, zeta, S, Y, SS, L, D)
                 else:
-                    # calculate the gradient and Hessian and regularize the Hessian if necessary to maintain appropriate matrix inertia
+                    # calculate the gradient and Hessian and regularize the Hessian if necessary to maintain appropriate
+                    # matrix inertia
                     g = -self.grad(x, s, lda)
                     Hc = self.reghess(self.hess(x, s, lda))
                     # calculate the search direction
-                    dz = self.sym_solve(Hc, g.reshape((g.size,1))).reshape((g.size,))
+                    dz = self.sym_solve(Hc, g.reshape((g.size, 1))).reshape((g.size,))
                     
                 if self.neq or self.nineq:
                     # change sign definition for the multipliers' search direction
-                    dz[self.nvar+self.nineq:] = -dz[self.nvar+self.nineq:]
+                    dz[self.nvar + self.nineq:] = -dz[self.nvar + self.nineq:]
 
                 if self.neq or self.nineq:
                     # update the merit function parameter, if necessary
-                    nu_thres = np.dot(self.barrier_cost_grad(x, s), dz[:self.nvar+self.nineq])/(1-self.rho)/np.sum(np.abs(self.con(x, s)))
+                    nu_thres = np.dot(
+                        self.barrier_cost_grad(x, s),
+                        dz[:self.nvar + self.nineq]
+                    ) / (1 - self.rho) / np.sum(np.abs(self.con(x, s)))
                     if self.nu_host < nu_thres:
                         self.nu_host = self.float_dtype(nu_thres)
                         self.nu_dev.set_value(self.nu_host)
 
                 if self.nineq:
                     # use fraction-to-the-boundary rule to make sure slacks and multipliers do not decrease too quickly
-                    alpha_smax = self.step(s, dz[self.nvar:(self.nvar+self.nineq)])
-                    alpha_lmax = self.step(lda[self.neq:], dz[(self.nvar+self.nineq+self.neq):])
+                    alpha_smax = self.step(s, dz[self.nvar:(self.nvar + self.nineq)])
+                    alpha_lmax = self.step(lda[self.neq:], dz[(self.nvar + self.nineq + self.neq):])
                     # use a backtracking line search to update weights, slacks, and multipliers
                     x, s, lda = self.search(x, s, lda, dz, self.float_dtype(alpha_smax), self.float_dtype(alpha_lmax))
                 else:
@@ -1584,10 +1649,10 @@ class IPM:
                 # calculate the updated KKT conditions
                 kkt = self.KKT(x, s, lda)
 
-                if self.Ftol is not None and not self.nineq and self.signal != -2:
+                if all([self.Ftol is not None, not self.nineq, self.signal != -2]):
                     # for unconstrained and equality constraints only, calculate new cost and check Ftol convergence
                     f_new = self.cost(x)
-                    if np.abs(f_past-f_new) <= np.abs(self.Ftol):
+                    if np.abs(f_past - f_new) <= np.abs(self.Ftol):
                         # converged to Ftol precision
                         self.signal = 2
                         Ftol_converged = True
@@ -1600,14 +1665,14 @@ class IPM:
                     # a bad search direction was chosen, terminating
                     break
 
-                if inner >= self.miter-1:
+                if inner >= self.miter - 1:
                     if self.verbosity > 0 and self.nineq:
-                        print "MAXIMUM INNER ITERATIONS EXCEEDED"
+                        print('MAXIMUM INNER ITERATIONS EXCEEDED')
 
-            if self.Ftol is not None and self.nineq and self.signal != -2:
+            if all([self.Ftol is not None, self.nineq, self.signal != -2]):
                 # when problem has inequality constraints, calculate new cost and check Ftol convergence
                 f_new = self.cost(x)
-                if np.abs(f_past-f_new) <= np.abs(self.Ftol):
+                if np.abs(f_past - f_new) <= np.abs(self.Ftol):
                     # converged to Ftol precision
                     self.signal = 2
                     Ftol_converged = True
@@ -1623,19 +1688,20 @@ class IPM:
                 # a bad search direction was chosen, terminating
                 break
                 
-            if outer >= self.niter-1:
+            if outer >= self.niter - 1:
                 self.signal = -1
                 if self.verbosity > 0:
                     if self.nineq:
-                        print "MAXIMUM OUTER ITERATIONS EXCEEDED"
+                        print('MAXIMUM OUTER ITERATIONS EXCEEDED')
                     else:
-                        print "MAXIMUM ITERATIONS EXCEEDED"
+                        print('MAXIMUM ITERATIONS EXCEEDED')
                 break
 
             if self.nineq:
                 # update the barrier parameter
-                xi = self.nineq*np.min(s*lda[self.neq:])/(np.dot(s, lda[self.neq:])+self.eps)
-                self.mu_host = 0.1*np.min([0.05*(1.0-xi)/(xi+self.eps), 2.0]) ** 3 * np.dot(s, lda[self.neq:])/self.nineq               
+                xi = self.nineq * np.min(s * lda[self.neq:]) / (np.dot(s, lda[self.neq:]) + self.eps)
+                self.mu_host = (0.1 * np.min([0.05 * (1.0 - xi) / (xi + self.eps), 2.0]) ** 3 *
+                                np.dot(s, lda[self.neq:]) / self.nineq)
                 if self.float_dtype(self.mu_host) < self.float_dtype(0.0):
                     self.mu_host = 0.0
                 self.mu_host = self.float_dtype(self.mu_host)
@@ -1649,56 +1715,53 @@ class IPM:
         self.fval = self.cost(x)
 
         if self.verbosity >= 0:
+            msg = []
             if self.signal == -2:
-                msg = "Terminated due to bad direction in backtracking line search "
-            elif np.linalg.norm(kkt[0]) <= self.Ktol and np.linalg.norm(kkt[1]) <= self.Ktol and np.linalg.norm(kkt[2]) <= self.Ktol and np.linalg.norm(kkt[3]) <= self.Ktol:
-                msg = "Converged to Ktol tolerance "
+                msg.append('Terminated due to bad direction in backtracking line search')
+            elif all([np.linalg.norm(kkt[0]) <= self.Ktol, np.linalg.norm(kkt[1]) <= self.Ktol,
+                      np.linalg.norm(kkt[2]) <= self.Ktol, np.linalg.norm(kkt[3]) <= self.Ktol]):
+                msg.append('Converged to Ktol tolerance')
             elif self.Ftol is not None and Ftol_converged:
-                msg = "Converged to Ftol tolerance "
+                msg.append('Converged to Ftol tolerance')
             else:
-                msg = "Maximum iterations reached "
+                msg.append('Maximum iterations reached')
                 outer = self.niter
                 inner = 0
 
             if self.nineq:
                 if outer > 1:
-                    msg += "after " + str(outer-1) + " outer "
-                    if outer > 2:
-                        msg += "iterations "
-                    else:
-                        msg += "iteration "
-                    msg += "and "
+                    msg.append('after {} outer'.format(outer - 1))
+                    msg.append('iterations' if outer > 2 else 'iteration')
+                    msg.append('and')
                 else:
-                    msg += "after "
-                msg += str(inner) + " inner "
-                if inner > 1:
-                    msg += "iterations "
-                else:
-                    msg += "iteration "
-                msg += "(" + str(iter_count) + " total)."
+                    msg.append('after')
+                msg.append('{} inner'.format(inner))
+                msg.append('iterations' if inner > 1 else 'iteration')
+                msg.append('({} total).'.format(iter_count))
             else:
-                msg += "after " + str(iter_count)
-                if iter_count > 1:
-                    msg += " iterations."
-                else:
-                    msg += " iteration."
-            print msg
+                msg.append('after {}'.format(iter_count))
+                msg.append('iterations.' if iter_count > 1 else 'iteration.')
+            print(' '.join(msg))
             if self.verbosity > 1:
-                msg = "FINAL: f(x) = " + str(self.cost(x))
+                msg = []
+                msg.append('FINAL: f(x) = {}'.format(self.cost(x)))
                 if self.verbosity > 2:
-                    msg += ", |dL/dx| = " + str(np.linalg.norm(kkt[0])) + ", |dL/ds| = " + str(np.linalg.norm(kkt[1]))
-                    msg += ", |ce| = " + str(np.linalg.norm(kkt[2])) + ", |ci-s| = " + str(np.linalg.norm(kkt[3]))
-                print msg
+                    msg.append('|dL/dx| = {}'.format(np.linalg.norm(kkt[0])))
+                    msg.append('|dL/ds| = {}'.format(np.linalg.norm(kkt[1])))
+                    msg.append('|ce| = {}'.format(np.linalg.norm(kkt[2])))
+                    msg.append('|ci-s| = {}'.format(np.linalg.norm(kkt[3])))
+                print(', '.join(msg))
 
         # return solution weights, slacks, multipliers, cost, and KKT conditions
-        return (self.x, self.s, self.lda, self.fval, self.kkt)
+        return self.x, self.s, self.lda, self.fval, self.kkt
 
 
-
-    
 def main():
     import sys
     import os
+
+    def list2str(lst):
+        return [str(l) for l in lst]
 
     # This main function provides example problems that may be used to help users write their code
     # (and to make sure modifications to IPM do not break the code). To call these test problems,
@@ -1736,197 +1799,214 @@ def main():
         try:
             float_dtype = float_dtype.split('floatX=')[1]
         except IndexError:
-            raise Exception("Error: attribute 'floatX' not defined in 'THEANO_FLAGS' environment variable.")
+            raise Exception('Error: attribute "floatX" not defined in "THEANO_FLAGS" environment variable.')
         float_dtype = float_dtype.split(',')[0]
     else:
-        raise Exception("Error: 'THEANO_FLAGS' environment variable is unset.")
-        exit()
-    if float_dtype.strip() == "float32":
+        raise Exception('Error: "THEANO_FLAGS" environment variable is unset.')
+    if float_dtype.strip() == 'float32':
         float_dtype = np.float32
     else:
         float_dtype = np.float64
 
     # example problem definitions
     if prob == 1:
-        print "minimize f(x,y) = x**2 - 4*x + y**2 - y - x*y"
-        print ""
+        print('minimize f(x, y) = x**2 - 4*x + y**2 - y - x*y')
+        print('')
         x0 = np.random.randn(2).astype(float_dtype)
 
-        f = x_dev[0]**2 - 4*x_dev[0] + x_dev[1]**2 - x_dev[1] - x_dev[0]*x_dev[1]
+        f = x_dev[0] ** 2 - 4 * x_dev[0] + x_dev[1] ** 2 - x_dev[1] - x_dev[0] * x_dev[1]
 
         p = IPM(x0=x0, x_dev=x_dev, f=f, Ftol=Ftol, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
         x, s, lda, fval, kkt = p.solve()
 
-        print ""
-        print "Ground truth: [x, y] = [" + str(float_dtype(3.0)) + ", " + str(float_dtype(2.0)) + "]"
-        print "Solver solution: [x, y] = [" + str(x[0]) + ", " + str(x[1]) + "]"
-        print "f(x,y) = " + str(fval)
+        gt = [float_dtype(3.0), float_dtype(2.0)]
+        print('')
+        print('Ground truth: [x, y] = [{}, {}]'.format(*gt))
+        print('Solver solution: [x, y] = [{}, {}]'.format(*x))
+        print('f(x, y) = {}'.format(fval))
     elif prob == 2:
-        print "Find the global minimum of the 2D Rosenbrock function."
-        print "minimize f(x,y) = 100*(y-x**2)**2 + (1-x)**2"
-        print ""
+        print('Find the global minimum of the 2D Rosenbrock function.')
+        print('minimize f(x, y) = 100*(y - x**2)**2 + (1 - x)**2')
+        print('')
         x0 = np.random.randn(2).astype(float_dtype)
         
-        f = 100*(x_dev[1]-x_dev[0]**2)**2 + (1-x_dev[0])**2
+        f = 100 * (x_dev[1] - x_dev[0] ** 2) ** 2 + (1 - x_dev[0]) ** 2
 
         p = IPM(x0=x0, x_dev=x_dev, f=f, Ftol=Ftol, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
         x, s, lda, fval, kkt = p.solve()
 
-        print ""
-        print "Ground truth: [x, y] = [" + str(float_dtype(1.0)) + ", " + str(float_dtype(1.0)) + "]"
-        print "Solver solution: [x, y] = [" + str(x[0]) + ", " + str(x[1]) + "]"
-        print "f(x,y) = " + str(fval)
+        gt = [float_dtype(1.0), float_dtype(1.0)]
+        print('')
+        print('Ground truth: [x, y] = [{}, {}]'.format(*gt))
+        print('Solver solution: [{}, {}]'.format(*x))
+        print('f(x, y) = {}'.format(fval))
     elif prob == 3:
-        print "maximize f(x,y) = x+y subject to x**2 + y**2 = 1"
-        print ""
+        print('maximize f(x, y) = x + y subject to x**2 + y**2 = 1')
+        print('')
         x0 = np.random.randn(2).astype(float_dtype)
 
         f = -T.sum(x_dev)
-        ce = T.sum(x_dev ** 2)-1.0
+        ce = T.sum(x_dev ** 2) - 1.0
 
         p = IPM(x0=x0, x_dev=x_dev, f=f, ce=ce, Ftol=Ftol, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
         x, s, lda, fval, kkt = p.solve()
 
-        print ""
-        print "Ground truth: [x, y] = [" + str(float_dtype(np.sqrt(2.0)/2.0)) + ", " + str(float_dtype(np.sqrt(2.0)/2.0)) + "]"
-        print "Solver solution: [x, y] = [" + str(x[0]) + ", " + str(x[1]) + "]"
-        print "Lagrange multiplier: lda = " + str(lda)
-        print "f(x,y) = " + str(-fval)
+        gt = [float_dtype(np.sqrt(2.0) / 2.0), float_dtype(np.sqrt(2.0) / 2.0)]
+        print('')
+        print('Ground truth: [x, y] = [{}, {}]'.format(*gt))
+        print('Solver solution: [x, y] = [{}, {}]'.format(*x))
+        print('Lagrange multiplier: lda = {}'.format(lda))
+        print('f(x, y) = {}'.format(-fval))
     elif prob == 4:
-        print "maximize f(x,y) = (x**2)*y subject to x**2 + y**2 = 3"
-        print ""
+        print('maximize f(x, y) = (x**2)*y subject to x**2 + y**2 = 3')
+        print('')
         x0 = np.random.randn(2).astype(float_dtype)
 
-        f = -(x_dev[0]**2)*x_dev[1]
+        f = -(x_dev[0] ** 2) * x_dev[1]
         ce = T.sum(x_dev ** 2) - 3.0
 
         p = IPM(x0=x0, x_dev=x_dev, f=f, ce=ce, Ftol=Ftol, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
         x, s, lda, fval, kkt = p.solve()
 
-        print ""
-        print "Ground truth: global max. @ [x, y] = [" + str(float_dtype(np.sqrt(2.0))) + ", " + str(float_dtype(1.0)) + "] or [" + str(-float_dtype(np.sqrt(2.0))) + ", " + str(float_dtype(1.0)) + "], local max. @ [x_gt, y_gt] = [0.0, " + str(-float_dtype(np.sqrt(3))) + "]"
-        print "Solver solution: [x, y] = [" + str(x[0]) + ", " + str(x[1]) + "]"
-        print "Lagrange multiplier: lda = " + str(lda)
-        print "f(x,y) = " + str(-fval)
+        gt = [
+            float_dtype(np.sqrt(2.0)), float_dtype(1.0),
+            -float_dtype(np.sqrt(2.0)), float_dtype(1.0),
+            float_dtype(0.0), -float_dtype(-np.sqrt(3.0)),
+        ]
+        print('')
+        print('Ground truth: global max. @ [x, y] = [{}, {}] or [{}, {}], local max. @ [{}, {}]'.format(*gt))
+        print('Solver solution: [x, y] = [{}, {}]'.format(*x))
+        print('Lagrange multipler: lda = {}'.format(lda))
+        print('f(x, y) = {}'.format(-fval))
     elif prob == 5:
-        print "minimize f(x,y) = x**2 + 2*y**2 + 2*x + 8*y subject to -x-2*y+10 <= 0, x >= 0, y >= 0"
-        print ""
+        print('minimize f(x, y) = x**2 + 2*y**2 + 2*x + 8*y subject to -x - 2*y + 10 <= 0, x >= 0, y >= 0')
+        print('')
         x0 = np.random.randn(2).astype(float_dtype)
 
-        f = x_dev[0]**2 + 2.0*x_dev[1]**2 + 2.0*x_dev[0] + 8.0*x_dev[1]
+        f = x_dev[0] ** 2 + 2.0 * x_dev[1] ** 2 + 2.0 * x_dev[0] + 8.0 * x_dev[1]
         ci = T.zeros((3,))
-        ci = T.set_subtensor(ci[0], x_dev[0]+2.0*x_dev[1]-10.0)
+        ci = T.set_subtensor(ci[0], x_dev[0] + 2.0 * x_dev[1] - 10.0)
         ci = T.set_subtensor(ci[1], x_dev[0])
         ci = T.set_subtensor(ci[2], x_dev[1])
 
         p = IPM(x0=x0, x_dev=x_dev, f=f, ci=ci, Ftol=Ftol, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
         x, s, lda, fval, kkt = p.solve()
 
-        print ""
-        print "Ground truth: [x, y] = [" + str(float_dtype(4.0)) + ", " +  str(float_dtype(3.0)) + "]"
-        print "Solver solution: [x, y] = [" + str(x[0]) + ", " + str(x[1]) + "]"
-        print "Slack variables: s = [" + str(-s[0]) + ", " + str(s[1]) + ", " + str(s[2]) + "]"
-        print "Lagrange multipliers: lda = [" + str(-lda[0]) + ", " + str(lda[1]) + ", " + str(lda[2]) + "]"
-        print "f(x,y) = " + str(fval)
+        gt = [float_dtype(4.0), float_dtype(3.0)]
+        print('')
+        print('Ground truth: [x, y] = [{}, {}]'.format(*gt))
+        print('Solver solution: [x, y] = [{}, {}]'.format(*x))
+        print('Slack variables: s = [{}, {}, {}]'.format(-s[0], s[1], s[2]))
+        print('Lagrange multipliers: lda = [{}, {}, {}]'.format(-lda[0], lda[1], lda[2]))
+        print('f(x, y) = {}'.format(fval))
     elif prob == 6:
-        print "Find the maximum entropy distribution of a six-sided die:"
-        print "maximize f(x) = -sum(x*log(x)) subject to sum(x) = 1 and x >= 0 (x.size=6)"
-        print ""
+        print('Find the maximum entropy distribution of a six-sided die:')
+        print('maximize f(x) = -sum(x*log(x)) subject to sum(x) = 1 and x >= 0 (x.size == 6)')
+        print('')
         x0 = np.random.rand(6).astype(float_dtype)
-        x0 = x0/np.sum(x0)
+        x0 = x0 / np.sum(x0)
 
-        f = T.sum(x_dev*T.log(x_dev + np.finfo(float_dtype).eps))
+        f = T.sum(x_dev * T.log(x_dev + np.finfo(float_dtype).eps))
         ce = T.sum(x_dev) - 1.0
-        ci = 1.0*x_dev
+        ci = 1.0 * x_dev
 
-        p = IPM(x0=x0, x_dev=x_dev, f=f, ce=ce, ci=ci, Ftol=Ftol, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
+        p = IPM(x0=x0, x_dev=x_dev, f=f, ce=ce, ci=ci, Ftol=Ftol, lbfgs=lbfgs, float_dtype=float_dtype,
+                verbosity=verbosity)
         x, s, lda, fval, kkt = p.solve()
 
-        gt = str(float_dtype(1.0/6.0))
-        print ""
-        print "Ground truth: x = [" + gt + ", " + gt + ", " + gt + ", " + gt + ", " + gt + ", " + gt + "]"
-        print "Solver solution: x = [" + str(x[0]) + ", " + str(x[1]) + ", " + str(x[2]) + ", " + str(x[3]) + ", " + str(x[4]) + ", " + str(x[5]) + "]"
-        print "Slack variables: s = [" + str(s[0]) + ", " + str(s[1]) + ", " + str(s[2]) + ", " + str(s[3]) + ", " + str(s[4]) + ", " + str(s[5]) + "]"
-        print "Lagrange multipliers: lda = [" + str(lda[0]) + ", " + str(lda[1]) + ", " + str(lda[2]) + ", " + str(lda[3]) + ", " + str(lda[4]) + ", " + str(lda[5]) + ", " + str(lda[6]) + "]"
-        print "f(x) = " + str(-fval)
+        gt = str(float_dtype(1.0 / 6.0))
+        print('')
+        print('Ground truth: [{}]'.format(', '.join([gt] * 6)))
+        print('Solver solution: x = [{}]'.format(', '.join(list2str(x))))
+        print('Slack variables: s = [{}]'.format(', '.join(list2str(s))))
+        print('Lagrange multipliers: lda = [{}]'.format(', '.join(list2str(lda))))
+        print('f(x) = {}'.format(-fval))
     elif prob == 7:
-        print "maximize f(x,y,z) = x*y*z subject to x+y+z = 1, x >= 0, y >= 0, z >= 0"
-        print ""
+        print('maximize f(x, y, z) = x*y*z subject to x + y + z = 1, x >= 0, y >= 0, z >= 0')
+        print('')
         x0 = np.random.randn(3).astype(float_dtype)
 
-        f = -x_dev[0]*x_dev[1]*x_dev[2]
+        f = -x_dev[0] * x_dev[1] * x_dev[2]
         ce = T.sum(x_dev) - 1.0
-        ci = 1.0*x_dev
+        ci = 1.0 * x_dev
 
-        p = IPM(x0=x0, x_dev=x_dev, f=f, ce=ce, ci=ci, Ftol=Ftol, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
+        p = IPM(x0=x0, x_dev=x_dev, f=f, ce=ce, ci=ci, Ftol=Ftol, lbfgs=lbfgs, float_dtype=float_dtype,
+                verbosity=verbosity)
         x, s, lda, fval, kkt = p.solve()
 
-        print ""
-        print "Ground truth: [x, y, z] = [" + str(float_dtype(1.0/3.0)) + ", " + str(float_dtype(1.0/3.0)) + ", " + str(float_dtype(1.0/3.0)) + "]"
-        print "Solver solution: [x, y, z] = [" + str(x[0]) + ", " + str(x[1]) + ", " + str(x[2]) + "]"
-        print "Slack variables: s = [" + str(s[0]) + ", " + str(s[1]) + ", " + str(s[2]) + "]"
-        print "Lagrange multipliers: lda = [" + str(lda[0]) + ", " + str(lda[1]) + ", " + str(lda[2]) + ", " + str(lda[3]) + "]"
-        print "f(x,y,z) = " + str(-fval)
+        gt = [float_dtype(1.0 / 3.0), float_dtype(1.0 / 3.0), float_dtype(1.0 / 3.0)]
+        print('')
+        print('Ground truth: [x, y, z] = [{}, {}, {}]'.format(*gt))
+        print('Solver solution: [x, y, z] = [{}, {}, {}]'.format(*x))
+        print('Slack variables: s = [{}, {}, {}]'.format(*s))
+        print('Lagrange multipliers: lda = [{}, {}, {}, {}]'.format(*lda))
+        print('f(x, y, z) = {}'.format(-fval))
     elif prob == 8:
-        print "minimize f(x,y,z) = 4*x-2*z subject to 2*x-y-z = 2, x**2 + y**2 = 1" 
-        print ""
+        print('minimize f(x,y,z) = 4*x - 2*z subject to 2*x - y - z = 2, x**2 + y**2 = 1')
+        print('')
         x0 = np.random.randn(3).astype(float_dtype)
 
-        f = 4.0*x_dev[1] - 2.0*x_dev[2]
+        f = 4.0 * x_dev[1] - 2.0 * x_dev[2]
         ce = T.zeros((2,))
-        ce = T.set_subtensor(ce[0], 2.0*x_dev[0]-x_dev[1]-x_dev[2]-2.0)
-        ce = T.set_subtensor(ce[1], x_dev[0]**2+x_dev[1]**2-1.0)
+        ce = T.set_subtensor(ce[0], 2.0 * x_dev[0] - x_dev[1] - x_dev[2] - 2.0)
+        ce = T.set_subtensor(ce[1], x_dev[0] ** 2 + x_dev[1] ** 2 - 1.0)
 
         p = IPM(x0=x0, x_dev=x_dev, f=f, ce=ce, Ftol=Ftol, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
         x, s, lda, fval, kkt = p.solve()
 
-        print ""
-        print "Ground truth: [x, y, z] = [" + str(float_dtype(2.0/np.sqrt(13.0))) + ", " + str(-float_dtype(3.0/np.sqrt(13.0))) + ", " + str(float_dtype(-2.0+7.0/np.sqrt(13.0))) + "]"
-        print "Solver solution: [x, y, z] = [" + str(x[0]) + ", " + str(x[1]) + ", " + str(x[2]) + "]"
-        print "Lagrange multipliers: lda = [" + str(lda[0]) + ", " + str(lda[1]) + "]"
-        print "f(x,y,z) = " + str(fval)
+        gt = [
+            float_dtype(2.0 / np.sqrt(13.0)),
+            float_dtype(-3.0 / np.sqrt(13.0)),
+            float_dtype(-2.0 + 7.0 / np.sqrt(13.0))
+        ]
+        print('')
+        print('Ground truth: [x, y, z] = [{}, {}, {}]'.format(*gt))
+        print('Solver solution: [x, y, z] = [{}, {}, {}]'.format(*x))
+        print('Lagrange multipliers: lda = [{}, {}]'.format(*lda))
+        print('f(x, y, z) = {}'.format(fval))
     elif prob == 9:
-        print "minimize f(x,y) = (x-2)**2 + 2*(y-1)**2 subject to x+4*y <= 3, x >= y"
-        print ""
+        print('minimize f(x, y) = (x - 2)**2 + 2*(y - 1)**2 subject to x + 4*y <= 3, x >= y')
+        print('')
         x0 = np.random.randn(2).astype(float_dtype)
 
-        f = (x_dev[0]-2.0)**2 + 2.0*(x_dev[1]-1.0)**2
+        f = (x_dev[0] - 2.0) ** 2 + 2.0 * (x_dev[1] - 1.0) ** 2
         ci = T.zeros(2)
-        ci = T.set_subtensor(ci[0], -x_dev[0]-4.0*x_dev[1]+3.0)
-        ci = T.set_subtensor(ci[1], x_dev[0]-x_dev[1])
+        ci = T.set_subtensor(ci[0], -x_dev[0] - 4.0 * x_dev[1] + 3.0)
+        ci = T.set_subtensor(ci[1], x_dev[0] - x_dev[1])
 
         p = IPM(x0=x0, x_dev=x_dev, f=f, ci=ci, Ftol=Ftol, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
         x, s, lda, fval, kkt = p.solve()
 
-        print ""
-        print "Ground truth: [x, y] = [" + str(float_dtype(5.0/3.0)) + ", " + str(float_dtype(1.0/3.0)) + "]"
-        print "Solver solution: [x, y] = [" + str(x[0]) + ", " + str(x[1]) + "]"
-        print "Slack variables: s = [" + str(-s[0]) + ", " + str(s[1]) + "]"
-        print "Lagrange multipliers: lda = [" + str(-lda[0]) + ", " + str(lda[1]) + "]"
-        print "f(x,y) = " + str(fval)
+        gt = [float_dtype(5.0 / 3.0), float_dtype(1.0 / 3.0)]
+        print('')
+        print('Ground truth: [x, y] = [{}, {}]'.format(*gt))
+        print('Solver solution: [x, y] = [{}, {}]'.format(*x))
+        print('Slack variables: s = [{}, {}]'.format(-s[0], s[1]))
+        print('Lagrange multipliers: lda = [{}, {}]'.format(-lda[0], lda[1]))
+        print('f(x, y) = {}'.format(fval))
     elif prob == 10:
-        print "minimize f(x,y,z) = (x-1)**2 + 2*(y+2)**2 + 3*(z+3)**2 subject to z-y-x = 1, z-x**2 >= 0"
-        print ""
+        print('minimize f(x, y, z) = (x - 1)**2 + 2*(y + 2)**2 + 3*(z + 3)**2 subject to z - y - x = 1, z - x**2 >= 0')
+        print('')
         x0 = np.random.randn(3).astype(float_dtype)
 
-        f = (x_dev[0]-1.0)**2 + 2.0*(x_dev[1]+2.0)**2 + 3.0*(x_dev[2]+3.0)**2
+        f = (x_dev[0] - 1.0) ** 2 + 2.0 * (x_dev[1] + 2.0) ** 2 + 3.0 * (x_dev[2] + 3.0) ** 2
         ce = x_dev[2] - x_dev[1] - x_dev[0] - 1.0
-        ci = x_dev[2] - x_dev[0]**2
+        ci = x_dev[2] - x_dev[0] ** 2
 
-        p = IPM(x0=x0, x_dev=x_dev, f=f, ce=ce, ci=ci, Ftol=Ftol, lbfgs=lbfgs, float_dtype=float_dtype, verbosity=verbosity)
+        p = IPM(x0=x0, x_dev=x_dev, f=f, ce=ce, ci=ci, Ftol=Ftol, lbfgs=lbfgs, float_dtype=float_dtype,
+                verbosity=verbosity)
         x, s, lda, fval, kkt = p.solve()
 
-        print ""
-        print "Ground truth: [x, y, z] = [0.12288, -1.1078, 0.015100]"
-        print "Solver solution: [x, y, z] = [" + str(x[0]) + ", " + str(x[1]) + ", " + str(x[2]) + "]"
-        print "Slack variable: s = " + str(s)
-        print "Lagrange multipliers: lda = [" + str(lda[0]) + ", " + str(lda[1]) + "]"
-        print "f(x,y) = " + str(fval)
+        gt = [0.12288, -1.1078, 0.015100]
+        print('')
+        print('Ground truth: [x, y, z] = [{}, {}, {}]'.format(*gt))
+        print('Solver solution: [x, y, z] = [{}, {}, {}]'.format(*x))
+        print('Slack variable: s = {}'.format(s))
+        print('Lagrange multipliers: lda = [{}, {}]'.format(*lda))
+        print('f(x, y) = {}'.format(fval))
 
-    print "Karush-Kuhn-Tucker conditions (up to a sign):"
-    print kkt
+    print('Karush-Kuhn-Tucker conditions (up to a sign):\n{}'.format(kkt))
+
 
 if __name__ == '__main__':
     main()
-
-

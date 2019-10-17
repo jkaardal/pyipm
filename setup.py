@@ -3,10 +3,9 @@ try:
 except ImportError:
     from distutils.core	import setup
 
-""" To install package pyipm and its dependencies, run:                                      
+""" To install package pyipm and its dependencies, run:
                                                                                              
-        python setup.py install                                                              
-                                                                                             
+        python setup.py install                                                                                             
 """
 
 setup(name='pyipm',

@@ -1387,7 +1387,7 @@ class IPM:
                         ).reshape((self.nvar + self.nineq,))
                     except:
                         # if the Jacobian is not invertible, find the minimum norm solution instead
-                        dz_p = -np.linalg.lstsq(A, c_new)[0]
+                        dz_p = -np.linalg.lstsq(A, c_new, rcond=None)[0]
                     if (self.phi(x0 + alpha_smax * dx + dz_p[:self.nvar], s0 + alpha_smax * ds + dz_p[self.nvar:]) <=
                             phi0 + alpha_smax * self.eta * dphi0):
                         alpha_corr = self.step(s0, alpha_smax * ds + dz_p[self.nvar:])
@@ -1436,7 +1436,7 @@ class IPM:
                             ).reshape((self.nvar + self.nineq,))
                         except:
                             # if the Jacobian is not invertible, find the minimum norm solution instead
-                            dz_p = -np.linalg.lstsq(A, c_new)[0]
+                            dz_p = -np.linalg.lstsq(A, c_new, rcond=None)[0]
                         if self.phi(x0 + alpha_smax * dx + dz_p, s0) <= phi0 + alpha_smax * self.eta * dphi0:
                             # correction accepted
                             if self.verbosity > 2:

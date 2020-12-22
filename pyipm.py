@@ -308,12 +308,6 @@ class IPM:
                  beta=0.4, miter=20, niter=10, Xtol=None, Ktol=1.0E-4, Ftol=None, lbfgs=False, lbfgs_zeta=None,
                  float_dtype=np.float64, verbosity=1):
 
-        self.nu_dev = theano.shared(self.float_dtype(self.nu), name='nu_dev')
-        self.mu_dev = theano.shared(self.float_dtype(self.mu), name='mu_dev')
-        self.dz_dev = T.vector('dz_dev')
-        self.b_dev = T.matrix('b_dev')
-        self.M_dev = T.matrix('M_dev')
-        self.s_dev = T.vector('s_dev')
         self.x0 = x0
         self.x_dev = x_dev
         self.lda0 = lda0
@@ -360,8 +354,15 @@ class IPM:
             self.lbfgs_zeta = lbfgs_zeta
         self.lbfgs_fail_max = lbfgs
 
-        self.verbosity = verbosity
         self.float_dtype = float_dtype
+        self.nu_dev = theano.shared(self.float_dtype(self.nu), name='nu_dev')
+        self.mu_dev = theano.shared(self.float_dtype(self.mu), name='mu_dev')
+        self.dz_dev = T.vector('dz_dev')
+        self.b_dev = T.matrix('b_dev')
+        self.M_dev = T.matrix('M_dev')
+        self.s_dev = T.vector('s_dev')
+
+        self.verbosity = verbosity
 
         self.delta0 = self.reg_coef
 

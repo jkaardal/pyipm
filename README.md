@@ -12,6 +12,18 @@ inequality constraints, {ci}. PYIPM uses a line search interior-point
 method to search for an x that is a feasible local minimizer of a
 user-defined nonlinear program.
 
+## Shift to Theano-PyMC
+
+Originally, this module used the Theano library maintained by the
+Montreal Institute for Learning Algorithms. The original version of
+Theano was deprecated in 2017. Fortunately, the PyMC team has taken
+over maintenance of Theano in a fork called
+[Theano-PyMC](https://github.com/pymc-devs/Theano-PyMC). The install
+script (setup.py) now installs Theano-PyMC instead of Theano as a
+dependency. That said, this module is still compatible with deprecated
+Theano so you may choose to continue using deprecated Theano (at least
+as long as your architecture can still run it).
+
 ## Getting Started
 
 The following instructions guide you through the necessary
@@ -19,11 +31,11 @@ prerequisites and installation of the code.
 
 ### Prerequisites
 
-Using PYIPM requires either a python 2.7 or python 3 interpreter. In
+Using PYIPM requires either a python 3 or python 2.7 interpreter. In
 addition to having python installed, the following packages are
 required:
 
-    NumPy, SciPy, Theano
+    NumPy, SciPy, Theano-PyMC
 
 Theano is used to speed up the code execution through parallelization
 and compilations of certain functions used in PYIPM. Furthermore,

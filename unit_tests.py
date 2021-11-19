@@ -1,10 +1,11 @@
 from __future__ import print_function
 
-import theano
-import theano.tensor as T
+import aesara as theano
+import aesara.tensor as T
 import numpy as np
 from pyipm import IPM
 
+np.random.seed(42)
 
 # text abbreviations for:
 #    f: objective function
